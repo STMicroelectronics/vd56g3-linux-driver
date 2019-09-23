@@ -1,0 +1,1 @@
+obj-$(CONFIG_DRIVER_ST_VD56G3)     += st-vd56g3.o
