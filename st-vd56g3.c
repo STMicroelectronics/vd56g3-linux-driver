@@ -85,10 +85,17 @@ static const u32 vd56g3_supported_codes[] = {
 	MEDIA_BUS_FMT_SGBRG10_1X10
 };
 
-const int vd56g3_sensor_frame_rates[] = { 15 };
+const int vd56g3_sensor_frame_rates[] = { 60, 30, 15, 10, 5, 2 };
 
 static const struct vd56g3_mode_info vd56g3_mode_data[] = {
 	{1124, 1364, 0},
+	{1024, 1280, 0},
+	{1024, 1024, 0},
+	{480, 640, 1},
+	{640, 480, 0},
+	{400, 400, 1},
+	{320, 240, 1},
+	{240, 320, 2},
 };
 
 struct vd56g3_dev {
