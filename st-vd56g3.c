@@ -25,6 +25,8 @@
 #define DEVICE_MODEL_ID_REG				0x0000
 #define VD56G3_MODEL_ID					0x5603
 #define DEVICE_FWPATCH_REVISION				0x001e
+#define DEVICE_SYSTEM_FSM				0x0028
+#define SENSOR_SW_STBY					0x02
 #define DEVICE_BOOT					0x0200
 #define CMD_BOOT					1
 #define CMD_PATCH_SETUP					2
@@ -273,6 +275,11 @@ static int vd56g3_poll_reg(struct vd56g3_dev *sensor, u16 reg, u8 poll_val)
 	return ret;
 }
 
+static int vd56g3_wait_state(struct vd56g3_dev *sensor, int state)
+{
+	return vd56g3_poll_reg(sensor, DEVICE_SYSTEM_FSM, state);
+}
+
 static int vd56g3_get_regulators(struct vd56g3_dev *sensor)
 {
 	int i;
@@ -413,6 +420,28 @@ static int vd56g3_patch(struct vd56g3_dev *sensor)
 		return -ENODEV;
 	}
 	dev_info(&client->dev, "patch %d.%d applied", patch >> 8, patch & 0xff);
+
+	return 0;
+}
+
+static int vd56g3_boot(struct vd56g3_dev *sensor)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	int ret;
+
+	ret = vd56g3_write_reg(sensor, DEVICE_BOOT, CMD_BOOT);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_poll_reg(sensor, DEVICE_BOOT, 0);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_wait_state(sensor, SENSOR_SW_STBY);
+	if (ret)
+		return ret;
+
+	dev_info(&client->dev, "sensor boot successfully");
 
 	return 0;
 }
@@ -825,6 +854,12 @@ static int vd56g3_probe(struct i2c_client *client)
 	ret = vd56g3_patch(sensor);
 	if (ret) {
 		dev_err(&client->dev, "sensor patch failed %d", ret);
+		goto disable_clock;
+	}
+
+	ret = vd56g3_boot(sensor);
+	if (ret) {
+		dev_err(&client->dev, "sensor boot failed %d", ret);
 		goto disable_clock;
 	}
 
