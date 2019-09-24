@@ -27,19 +27,38 @@
 #define DEVICE_FWPATCH_REVISION				0x001e
 #define DEVICE_SYSTEM_FSM				0x0028
 #define SENSOR_SW_STBY					0x02
+#define SENSOR_STREAMING				0x03
 #define DEVICE_BOOT					0x0200
 #define CMD_BOOT					1
 #define CMD_PATCH_SETUP					2
+#define DEVICE_SW_STBY					0x0201
+#define CMD_START_STREAM				1
+#define DEVICE_STREAMING				0x0202
+#define CMD_STOP_STREAM					1
 #define DEVICE_EXT_CLOCK				0x0220
 #define DEVICE_CLK_PLL_PREDIV				0x0224
 #define DEVICE_CLK_SYS_PLL_MULT				0x0226
+#define DEVICE_LINE_LENGTH				0x0300
+#define DEVICE_FORMAT_CTRL				0x030a
 #define DEVICE_OIF_CTRL					0x030c
+#define DEVICE_OIF_IMG_CTRL				0x030f
 #define DEVICE_OIF_CSI_BITRATE				0x0312
 #define DEVICE_ISL_ENABLE				0x0333
 #define DEVICE_OUTPUT_CTRL				0x0334
 #define OUTPUT_CTRL_OPTICAL_FLOW			0
 #define OUTPUT_CTRL_IMAGE				1
 #define OUTPUT_CTRL__OPTICAL_FLOW_AND_IMAGE		2
+#define DEVICE_EXP_MODE					0x044c
+#define EXP_MODE_AUTO					0
+#define DEVICE_FRAME_LENGTH				0x0458
+#define DEVICE_ROI_X_START				0x045e
+#define DEVICE_ROI_X_END				0x0460
+#define DEVICE_ROI_Y_START				0x0462
+#define DEVICE_ROI_Y_END				0x0464
+#define DEVICE_READOUT_CTRL				0x048c
+
+#define SENSOR_WIDTH					1124
+#define SENSOR_HEIGHT					1364
 
 #include "st-vd56g3_patch.c"
 
@@ -84,6 +103,7 @@ struct vd56g3_dev {
 	int nb_of_lane;
 	int data_rate_in_mbps;
 	int pclk;
+	u16 line_length;
 	/* lock to protect all members below */
 	struct mutex lock;
 	struct v4l2_ctrl_handler ctrl_handler;
@@ -117,6 +137,20 @@ static u8 get_bpp_by_code(__u32 code)
 	WARN(1, "Unsupported code %d. default to 8 bpp", code);
 
 	return 8;
+}
+
+static u8 get_datatype_by_code(__u32 code)
+{
+	switch (code) {
+	case MEDIA_BUS_FMT_SGBRG8_1X8:
+		return 0x2a;
+	case MEDIA_BUS_FMT_SGBRG10_1X10:
+		return 0x2b;
+	}
+
+	WARN(1, "Unsupported code %d. default to 0x2a data type", code);
+
+	return 0x2a;
 }
 
 static void compute_pll_parameters_by_freq(u32 freq, unsigned int *prediv,
@@ -416,14 +450,105 @@ static int vd56g3_try_fmt_internal(struct v4l2_subdev *sd,
 	return 0;
 }
 
+static int set_frame_rate(struct vd56g3_dev *sensor)
+{
+	u16 frame_length;
+
+	frame_length = sensor->pclk /
+		(sensor->line_length * sensor->frame_interval.denominator);
+
+	return vd56g3_write_reg16(sensor, DEVICE_FRAME_LENGTH, frame_length);
+}
+
+static int apply_exposure(struct vd56g3_dev *sensor)
+{
+	return vd56g3_write_reg(sensor, DEVICE_EXP_MODE, EXP_MODE_AUTO);
+}
+
 static int vd56g3_stream_enable(struct vd56g3_dev *sensor)
 {
-	return -EINVAL;
+	int center_x = SENSOR_WIDTH / 2;
+	int center_y = SENSOR_HEIGHT / 2;
+	int scale = 1 << sensor->current_mode->bin_mode;
+	int width = sensor->current_mode->width * scale;
+	int height = sensor->current_mode->height * scale;
+	int ret;
+
+	/* configure output mode */
+	ret = vd56g3_write_reg(sensor, DEVICE_FORMAT_CTRL,
+			       get_bpp_by_code(sensor->fmt.code));
+	if (ret)
+		return ret;
+	ret = vd56g3_write_reg(sensor, DEVICE_OIF_IMG_CTRL,
+			       get_datatype_by_code(sensor->fmt.code));
+	if (ret)
+		return ret;
+
+	/* configure size and bin mode */
+	ret = vd56g3_write_reg(sensor, DEVICE_READOUT_CTRL,
+			       sensor->current_mode->bin_mode);
+	if (ret)
+		return ret;
+	ret = vd56g3_write_reg16(sensor, DEVICE_ROI_X_START,
+				 center_x - width / 2);
+	if (ret)
+		return ret;
+	ret = vd56g3_write_reg16(sensor, DEVICE_ROI_X_END,
+				 center_x + width / 2 - 1);
+	if (ret)
+		return ret;
+	ret = vd56g3_write_reg16(sensor, DEVICE_ROI_Y_START,
+				 center_y - height / 2);
+	if (ret)
+		return ret;
+	ret = vd56g3_write_reg16(sensor, DEVICE_ROI_Y_END,
+				 center_y + height / 2 - 1);
+	if (ret)
+		return ret;
+
+	/* configure frame rate */
+	ret = set_frame_rate(sensor);
+	if (ret)
+		return ret;
+
+	/* configure exposure */
+	ret = apply_exposure(sensor);
+	if (ret)
+		return ret;
+
+	/* start streaming */
+	ret = vd56g3_write_reg(sensor, DEVICE_SW_STBY, CMD_START_STREAM);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_poll_reg(sensor, DEVICE_STREAMING, 0);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_wait_state(sensor, SENSOR_STREAMING);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static int vd56g3_stream_disable(struct vd56g3_dev *sensor)
 {
-	return -EINVAL;
+	int ret;
+
+	ret = vd56g3_write_reg(sensor, DEVICE_STREAMING, CMD_STOP_STREAM);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_poll_reg(sensor, DEVICE_STREAMING, 0);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_wait_state(sensor, SENSOR_SW_STBY);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static int vd56g3_rx_from_ep(struct vd56g3_dev *sensor,
@@ -511,6 +636,11 @@ static int vd56g3_configure(struct vd56g3_dev *sensor)
 	int ret;
 
 	compute_pll_parameters_by_freq(sensor->clk_freq, &prediv, &mult);
+	/* cache line_length value */
+	ret = vd56g3_read_reg16(sensor, DEVICE_LINE_LENGTH,
+				&sensor->line_length);
+	if (ret)
+		return ret;
 	/* configure clocks */
 	ret = vd56g3_write_reg32(sensor, DEVICE_EXT_CLOCK, sensor->clk_freq);
 	if (ret)
