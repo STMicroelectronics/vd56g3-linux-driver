@@ -561,17 +561,76 @@ static int vd56g3_stream_disable(struct vd56g3_dev *sensor)
 static int vd56g3_rx_from_ep(struct vd56g3_dev *sensor,
 			     struct fwnode_handle *endpoint)
 {
-	/* FIXME : use ep to setup rx */
+	struct v4l2_fwnode_endpoint ep = { .bus_type = V4L2_MBUS_CSI2_DPHY };
+	struct i2c_client *client = sensor->i2c_client;
+	u32 log2phy[3] = {~0, ~0, ~0};
+	u32 phy2log[3] = {~0, ~0, ~0};
+	int polarities[3] = {0, 0, 0};
+	int l_nb;
+	int p, l;
+	int ret;
+	int i;
 
-	sensor->oif_ctrl = 2 | /* two lanes */
-			   (0 << 3) | /* no swap for clk */
-			   (0 << 4) | /* logic 0 map to physical 0 */
-			   (0 << 6) | /* no swap for lane 0 */
-			   (1 << 7) | /* logic 1 map to physical 1 */
-			   (0 << 9);  /* no swap for lane 1 */
-	sensor->nb_of_lane = 2;
+	ret = v4l2_fwnode_endpoint_alloc_parse(endpoint, &ep);
+	if (ret)
+		goto error_alloc;
+
+	l_nb = ep.bus.mipi_csi2.num_data_lanes;
+	if (l_nb != 1 && l_nb != 2) {
+		dev_err(&client->dev, "invalid data lane number %d\n", l_nb);
+		goto error_ep;
+	}
+
+	/* build  log2phy, phy2log and polarities from ep info */
+	log2phy[0] = ep.bus.mipi_csi2.clock_lane;
+	phy2log[log2phy[0]] = 0;
+	for (l = 1; l < l_nb + 1; l++) {
+		log2phy[l] = ep.bus.mipi_csi2.data_lanes[l - 1];
+		phy2log[log2phy[l]] = l;
+	}
+	/*
+	 * then fill remaining slots for every physical slot have something
+	 * valid for hardware stuff.
+	 */
+	for (p = 0; p < 3; p++) {
+		if (phy2log[p] != ~0)
+			continue;
+		phy2log[p] = l;
+		log2phy[l] = p;
+		l++;
+	}
+	for (l = 0; l < l_nb + 1; l++)
+		polarities[l] = ep.bus.mipi_csi2.lane_polarities[l];
+
+	if (log2phy[0] != 0) {
+		dev_err(&client->dev, "clk lane must be map to physical lane 0\n");
+		goto error_ep;
+	}
+	sensor->oif_ctrl = l_nb |
+			   (polarities[0] << 3) |
+			   ((phy2log[1] - 1) << 4) |
+			   (polarities[1] << 6) |
+			   ((phy2log[2] - 1) << 7) |
+			   (polarities[2] << 9);
+	sensor->nb_of_lane = l_nb;
+
+	dev_dbg(&client->dev, "rx use %d lanes", l_nb);
+	for (i = 0; i < 3; i++) {
+		dev_dbg(&client->dev, "log2phy[%d] = %d", i, log2phy[i]);
+		dev_dbg(&client->dev, "phy2log[%d] = %d", i, phy2log[i]);
+		dev_dbg(&client->dev, "polarity[%d] = %d", i, polarities[i]);
+	}
+	dev_dbg(&client->dev, "oif_ctrl = 0x%04x\n", sensor->oif_ctrl);
+
+	v4l2_fwnode_endpoint_free(&ep);
 
 	return 0;
+
+error_ep:
+	v4l2_fwnode_endpoint_free(&ep);
+error_alloc:
+
+	return -EINVAL;
 }
 
 static int vd56g3_patch(struct vd56g3_dev *sensor)
