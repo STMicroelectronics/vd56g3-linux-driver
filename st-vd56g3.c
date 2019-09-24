@@ -557,15 +557,12 @@ static int vd56g3_rx_from_ep(struct vd56g3_dev *sensor,
 	/* FIXME : use ep to setup rx */
 
 	sensor->oif_ctrl = 2 | /* two lanes */
-			   (0 < 3) | /* no swap for clk */
-			   (0 < 4) | /* logic 0 map to physical 0 */
-			   (0 < 6) | /* no swap for lane 0 */
-			   (2 < 8) | /* logic 1 map to physical 1 */
-			   (0 < 9);  /* no swap for lane 1 */
-
+			   (0 << 3) | /* no swap for clk */
+			   (0 << 4) | /* logic 0 map to physical 0 */
+			   (0 << 6) | /* no swap for lane 0 */
+			   (1 << 7) | /* logic 1 map to physical 1 */
+			   (0 << 9);  /* no swap for lane 1 */
 	sensor->nb_of_lane = 2;
-	/* FIXME : compute in configure */
-	sensor->data_rate_in_mbps = 804;
 
 	return 0;
 }
