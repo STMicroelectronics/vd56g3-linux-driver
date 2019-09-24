@@ -699,6 +699,7 @@ static int vd56g3_remove(struct i2c_client *client)
 	clk_disable_unprepare(sensor->xclk);
 	mutex_destroy(&sensor->lock);
 	media_entity_cleanup(&sensor->sd.entity);
+	regulator_bulk_disable(VD56G3_NUM_SUPPLIES, sensor->supplies);
 
 	return 0;
 }
