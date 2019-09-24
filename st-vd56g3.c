@@ -20,8 +20,16 @@
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
 
+#define WRITE_MULTIPLE_CHUNK_MAX			16
+
 #define DEVICE_MODEL_ID_REG				0x0000
 #define VD56G3_MODEL_ID					0x5603
+#define DEVICE_FWPATCH_REVISION				0x001e
+#define DEVICE_BOOT					0x0200
+#define CMD_BOOT					1
+#define CMD_PATCH_SETUP					2
+
+#include "st-vd56g3_patch.c"
 
 /* regulator supplies */
 static const char * const vd56g3_supply_name[] = {
@@ -104,6 +112,19 @@ static s32 get_pixel_rate(struct vd56g3_dev *sensor)
 			 get_bpp_by_code(sensor->fmt.code));
 }
 
+static int get_chunk_size(struct vd56g3_dev *sensor)
+{
+	int max_write_len = WRITE_MULTIPLE_CHUNK_MAX;
+	struct i2c_adapter *adapter = sensor->i2c_client->adapter;
+
+	if (adapter->quirks && adapter->quirks->max_write_len)
+		max_write_len = adapter->quirks->max_write_len - 2;
+
+	max_write_len = min(max_write_len, WRITE_MULTIPLE_CHUNK_MAX);
+
+	return max(max_write_len, 1);
+}
+
 static int vd56g3_read_reg(struct vd56g3_dev *sensor, u16 reg, u8 *val)
 {
 	struct i2c_client *client = sensor->i2c_client;
@@ -148,6 +169,108 @@ static int vd56g3_read_reg16(struct vd56g3_dev *sensor, u16 reg, u16 *val)
 	*val = ((u16)hi << 8) | (u16)lo;
 
 	return 0;
+}
+
+static int vd56g3_write_reg(struct vd56g3_dev *sensor, u16 reg, u8 val)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	struct i2c_msg msg;
+	u8 buf[3];
+	int ret;
+
+	buf[0] = reg >> 8;
+	buf[1] = reg & 0xff;
+	buf[2] = val;
+
+	msg.addr = client->addr;
+	msg.flags = client->flags;
+	msg.buf = buf;
+	msg.len = sizeof(buf);
+
+	ret = i2c_transfer(client->adapter, &msg, 1);
+	if (ret < 0) {
+		dev_dbg(&client->dev, "%s: i2c_transfer, reg: %x => %d\n",
+			__func__, reg, ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+static int vd56g3_write_multiple(struct vd56g3_dev *sensor, u16 reg,
+				 const u8 *data, int len)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	struct i2c_msg msg;
+	u8 buf[WRITE_MULTIPLE_CHUNK_MAX + 2];
+	int i;
+	int ret;
+
+	if (len > WRITE_MULTIPLE_CHUNK_MAX)
+		return -EINVAL;
+	buf[0] = reg >> 8;
+	buf[1] = reg & 0xff;
+	for (i = 0; i < len; i++)
+		buf[i + 2] = data[i];
+
+	msg.addr = client->addr;
+	msg.flags = client->flags;
+	msg.buf = buf;
+	msg.len = len + 2;
+
+	ret = i2c_transfer(client->adapter, &msg, 1);
+	if (ret < 0) {
+		dev_dbg(&client->dev, "%s: i2c_transfer, reg: %x => %d\n",
+			__func__, reg, ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+static int vd56g3_write_array(struct vd56g3_dev *sensor, u16 reg, int nb,
+			      const u8 *array)
+{
+	const int chunk_size = get_chunk_size(sensor);
+	int ret;
+	int sz;
+
+	while (nb) {
+		sz = min(nb, chunk_size);
+		ret = vd56g3_write_multiple(sensor, reg, array, sz);
+		if (ret < 0)
+			return ret;
+		nb -= sz;
+		reg += sz;
+		array += sz;
+	}
+
+	return 0;
+}
+
+static int vd56g3_poll_reg(struct vd56g3_dev *sensor, u16 reg, u8 poll_val)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	const int loop_delay_ms = 10;
+	const int timeout_ms = 500;
+	int loop_nb = timeout_ms / loop_delay_ms;
+	u8 val;
+	int ret;
+
+	while (--loop_nb) {
+		ret = vd56g3_read_reg(sensor, reg, &val);
+		if (ret)
+			return ret;
+		dev_dbg(&client->dev,  "%s: got %d / waiting %d => ret = %d",
+			__func__, val, poll_val, ret);
+		if (val == poll_val)
+			break;
+		msleep(loop_delay_ms);
+	}
+	if (!loop_nb)
+		return -ETIMEDOUT;
+
+	return ret;
 }
 
 static int vd56g3_get_regulators(struct vd56g3_dev *sensor)
@@ -254,6 +377,42 @@ static int vd56g3_rx_from_ep(struct vd56g3_dev *sensor,
 	sensor->nb_of_lane = 2;
 	/* FIXME : compute in configure */
 	sensor->data_rate_in_mbps = 804;
+
+	return 0;
+}
+
+static int vd56g3_patch(struct vd56g3_dev *sensor)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	u16 patch;
+	int ret;
+
+	ret = vd56g3_write_array(sensor, 0x2000, sizeof(array_0x2000),
+				 array_0x2000);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_write_reg(sensor, DEVICE_BOOT, CMD_PATCH_SETUP);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_poll_reg(sensor, DEVICE_BOOT, 0);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_read_reg16(sensor, DEVICE_FWPATCH_REVISION, &patch);
+	if (ret)
+		return ret;
+
+	if (patch != (DEVICE_FWPATCH_REVISION_MAJOR << 8) +
+	    DEVICE_FWPATCH_REVISION_MINOR) {
+		dev_err(&client->dev, "bad patch version expected %d.%d got %d.%d",
+			DEVICE_FWPATCH_REVISION_MAJOR,
+			DEVICE_FWPATCH_REVISION_MINOR,
+			patch >> 8, patch & 0xff);
+		return -ENODEV;
+	}
+	dev_info(&client->dev, "patch %d.%d applied", patch >> 8, patch & 0xff);
 
 	return 0;
 }
@@ -663,7 +822,12 @@ static int vd56g3_probe(struct i2c_client *client)
 		goto disable_clock;
 	}
 
-	/* FIXME : patch */
+	ret = vd56g3_patch(sensor);
+	if (ret) {
+		dev_err(&client->dev, "sensor patch failed %d", ret);
+		goto disable_clock;
+	}
+
 	/* FIXME : configure */
 
 	ret = vd56g3_init_controls(sensor);
