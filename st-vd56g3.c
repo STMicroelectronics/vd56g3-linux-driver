@@ -30,6 +30,16 @@
 #define DEVICE_BOOT					0x0200
 #define CMD_BOOT					1
 #define CMD_PATCH_SETUP					2
+#define DEVICE_EXT_CLOCK				0x0220
+#define DEVICE_CLK_PLL_PREDIV				0x0224
+#define DEVICE_CLK_SYS_PLL_MULT				0x0226
+#define DEVICE_OIF_CTRL					0x030c
+#define DEVICE_OIF_CSI_BITRATE				0x0312
+#define DEVICE_ISL_ENABLE				0x0333
+#define DEVICE_OUTPUT_CTRL				0x0334
+#define OUTPUT_CTRL_OPTICAL_FLOW			0
+#define OUTPUT_CTRL_IMAGE				1
+#define OUTPUT_CTRL__OPTICAL_FLOW_AND_IMAGE		2
 
 #include "st-vd56g3_patch.c"
 
@@ -73,6 +83,7 @@ struct vd56g3_dev {
 	u16 oif_ctrl;
 	int nb_of_lane;
 	int data_rate_in_mbps;
+	int pclk;
 	/* lock to protect all members below */
 	struct mutex lock;
 	struct v4l2_ctrl_handler ctrl_handler;
@@ -106,6 +117,30 @@ static u8 get_bpp_by_code(__u32 code)
 	WARN(1, "Unsupported code %d. default to 8 bpp", code);
 
 	return 8;
+}
+
+static void compute_pll_parameters_by_freq(u32 freq, unsigned int *prediv,
+					   unsigned int *mult)
+{
+	const unsigned int predivs[] = {1, 2, 4};
+	int i;
+
+	/*
+	 * freq range is [6Mhz-27Mhz] already checked.
+	 * output of divider should be in [6Mhz-12Mhz[.
+	 */
+	for (i = 0; i < ARRAY_SIZE(predivs); i++) {
+		*prediv = predivs[i];
+		if (freq / *prediv < 12000000)
+			break;
+	}
+	BUG_ON(i == ARRAY_SIZE(predivs));
+
+	/*
+	 * target freq is 804Mhz. Don't change this as it will impact image
+	 * quality.
+	 */
+	*mult = (804000000U * (*prediv) + freq / 2) / freq;
 }
 
 static s32 get_pixel_rate(struct vd56g3_dev *sensor)
@@ -197,6 +232,28 @@ static int vd56g3_write_reg(struct vd56g3_dev *sensor, u16 reg, u8 val)
 	}
 
 	return 0;
+}
+
+static int vd56g3_write_reg16(struct vd56g3_dev *sensor, u16 reg, u16 val)
+{
+	int ret;
+
+	ret = vd56g3_write_reg(sensor, reg, val & 0xff);
+	if (ret)
+		return ret;
+
+	return vd56g3_write_reg(sensor, reg + 1, val >> 8);
+}
+
+static int vd56g3_write_reg32(struct vd56g3_dev *sensor, u16 reg, u32 val)
+{
+	int ret;
+
+	ret = vd56g3_write_reg16(sensor, reg, val & 0xffff);
+	if (ret)
+		return ret;
+
+	return vd56g3_write_reg16(sensor, reg + 2, val >> 16);
 }
 
 static int vd56g3_write_multiple(struct vd56g3_dev *sensor, u16 reg,
@@ -442,6 +499,48 @@ static int vd56g3_boot(struct vd56g3_dev *sensor)
 		return ret;
 
 	dev_info(&client->dev, "sensor boot successfully");
+
+	return 0;
+}
+
+static int vd56g3_configure(struct vd56g3_dev *sensor)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	unsigned int prediv;
+	unsigned int mult;
+	int ret;
+
+	compute_pll_parameters_by_freq(sensor->clk_freq, &prediv, &mult);
+	/* configure clocks */
+	ret = vd56g3_write_reg32(sensor, DEVICE_EXT_CLOCK, sensor->clk_freq);
+	if (ret)
+		return ret;
+	ret = vd56g3_write_reg(sensor, DEVICE_CLK_PLL_PREDIV, prediv);
+	if (ret)
+		return ret;
+	ret = vd56g3_write_reg(sensor, DEVICE_CLK_SYS_PLL_MULT, mult);
+	if (ret)
+		return ret;
+	/* configure interface */
+	ret = vd56g3_write_reg16(sensor, DEVICE_OIF_CTRL, sensor->oif_ctrl);
+	if (ret)
+		return ret;
+	ret = vd56g3_write_reg16(sensor, DEVICE_OIF_CSI_BITRATE, 804);
+	if (ret)
+		return ret;
+	ret = vd56g3_write_reg(sensor, DEVICE_ISL_ENABLE, 0);
+	if (ret)
+		return ret;
+	ret = vd56g3_write_reg(sensor, DEVICE_OUTPUT_CTRL, OUTPUT_CTRL_IMAGE);
+	if (ret)
+		return ret;
+
+	sensor->data_rate_in_mbps = (mult * sensor->clk_freq) / prediv;
+	sensor->pclk = (sensor->data_rate_in_mbps * 2) / 10;
+	dev_dbg(&client->dev, "clock prediv = %d", prediv);
+	dev_dbg(&client->dev, "clock mult = %d", mult);
+	dev_info(&client->dev, "data rate = %d mbps",
+		 sensor->data_rate_in_mbps);
 
 	return 0;
 }
@@ -863,7 +962,11 @@ static int vd56g3_probe(struct i2c_client *client)
 		goto disable_clock;
 	}
 
-	/* FIXME : configure */
+	ret = vd56g3_configure(sensor);
+	if (ret) {
+		dev_err(&client->dev, "sensor configuration failed %d", ret);
+		goto disable_clock;
+	}
 
 	ret = vd56g3_init_controls(sensor);
 	if (ret) {
