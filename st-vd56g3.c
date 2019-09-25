@@ -52,6 +52,7 @@
 #define OUTPUT_CTRL_OPTICAL_FLOW			0
 #define OUTPUT_CTRL_IMAGE				1
 #define OUTPUT_CTRL__OPTICAL_FLOW_AND_IMAGE		2
+#define DEVICE_PATGEN_CTRL				0x0400
 #define DEVICE_EXP_MODE					0x044c
 #define EXP_MODE_AUTO					0
 #define DEVICE_FRAME_LENGTH				0x0458
@@ -65,6 +66,11 @@
 #define SENSOR_HEIGHT					1364
 
 #include "st-vd56g3_patch.c"
+
+static const char * const vd56g3_test_pattern_menu[] = {
+	"Disabled", "Solid", "Colorbar", "Gradbar",
+	"Hgrey", "Vgrey", "Dgrey", "PN28"
+};
 
 /* regulator supplies */
 static const char * const vd56g3_supply_name[] = {
@@ -394,6 +400,18 @@ static int vd56g3_get_regulators(struct vd56g3_dev *sensor)
 	return devm_regulator_bulk_get(&sensor->i2c_client->dev,
 				       VD56G3_NUM_SUPPLIES,
 				       sensor->supplies);
+}
+
+static int vd56g3_update_patgen(struct vd56g3_dev *sensor, u32 index)
+{
+	u32 pattern = index <= 3 ? index : index + 12;
+	u16 reg;
+
+	reg = pattern << 4;
+	if (index)
+		reg |= 1;
+
+	return vd56g3_write_reg16(sensor, DEVICE_PATGEN_CTRL, reg);
 }
 
 static void vd56g3_apply_reset(struct vd56g3_dev *sensor)
@@ -1109,6 +1127,9 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 		ret = vd56g3_write_reg(sensor, DEVICE_ORIENTATION,
 				       sensor->hflip | (sensor->vflip << 1));
 		break;
+	case V4L2_CID_TEST_PATTERN:
+		ret = vd56g3_update_patgen(sensor, ctrl->val);
+		break;
 	default:
 		ret = -EINVAL;
 		break;
@@ -1135,6 +1156,10 @@ static int vd56g3_init_controls(struct vd56g3_dev *sensor)
 	/* add flipping */
 	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VFLIP, 0, 1, 1, 0);
 	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HFLIP, 0, 1, 1, 0);
+	/* add pattern generator */
+	v4l2_ctrl_new_std_menu_items(hdl, ops, V4L2_CID_TEST_PATTERN,
+				     ARRAY_SIZE(vd56g3_test_pattern_menu) - 1,
+				     0, 0, vd56g3_test_pattern_menu);
 	/* add V4L2_CID_PIXEL_RATE */
 	ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_PIXEL_RATE, 1, INT_MAX, 1,
 				 get_pixel_rate(sensor));
