@@ -55,6 +55,7 @@
 #define DEVICE_PATGEN_CTRL				0x0400
 #define DEVICE_EXP_MODE					0x044c
 #define EXP_MODE_AUTO					0
+#define EXP_MODE_MANUAL					2
 #define DEVICE_FRAME_LENGTH				0x0458
 #define DEVICE_ROI_X_START				0x045e
 #define DEVICE_ROI_X_END				0x0460
@@ -414,6 +415,24 @@ static int vd56g3_update_patgen(struct vd56g3_dev *sensor, u32 index)
 	return vd56g3_write_reg16(sensor, DEVICE_PATGEN_CTRL, reg);
 }
 
+static int vd56g3_update_exposure_auto(struct vd56g3_dev *sensor, u32 index)
+{
+	int ret;
+
+	switch (index) {
+	case V4L2_EXPOSURE_AUTO:
+		ret = vd56g3_write_reg(sensor, DEVICE_EXP_MODE, EXP_MODE_AUTO);
+		break;
+	case V4L2_EXPOSURE_MANUAL:
+		ret = vd56g3_write_reg(sensor, DEVICE_EXP_MODE, EXP_MODE_MANUAL);
+		break;
+	default:
+		ret = -EINVAL;
+	}
+
+	return ret;
+}
+
 static void vd56g3_apply_reset(struct vd56g3_dev *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
@@ -494,11 +513,6 @@ static int set_frame_rate(struct vd56g3_dev *sensor)
 	return vd56g3_write_reg16(sensor, DEVICE_FRAME_LENGTH, frame_length);
 }
 
-static int apply_exposure(struct vd56g3_dev *sensor)
-{
-	return vd56g3_write_reg(sensor, DEVICE_EXP_MODE, EXP_MODE_AUTO);
-}
-
 static int vd56g3_stream_enable(struct vd56g3_dev *sensor)
 {
 	int center_x = SENSOR_WIDTH / 2;
@@ -542,11 +556,6 @@ static int vd56g3_stream_enable(struct vd56g3_dev *sensor)
 
 	/* configure frame rate */
 	ret = set_frame_rate(sensor);
-	if (ret)
-		return ret;
-
-	/* configure exposure */
-	ret = apply_exposure(sensor);
 	if (ret)
 		return ret;
 
@@ -828,6 +837,10 @@ static int vd56g3_configure(struct vd56g3_dev *sensor)
 	if (ret)
 		return ret;
 	ret = vd56g3_write_reg(sensor, DEVICE_OUTPUT_CTRL, OUTPUT_CTRL_IMAGE);
+	if (ret)
+		return ret;
+	/* use auto expo by default */
+	ret = vd56g3_write_reg(sensor, DEVICE_EXP_MODE, EXP_MODE_AUTO);
 	if (ret)
 		return ret;
 
@@ -1130,6 +1143,9 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_TEST_PATTERN:
 		ret = vd56g3_update_patgen(sensor, ctrl->val);
 		break;
+	case V4L2_CID_EXPOSURE_AUTO:
+		ret = vd56g3_update_exposure_auto(sensor, ctrl->val);
+		break;
 	default:
 		ret = -EINVAL;
 		break;
@@ -1167,6 +1183,9 @@ static int vd56g3_init_controls(struct vd56g3_dev *sensor)
 	ctrl = v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_LINK_FREQ,
 				      ARRAY_SIZE(link_freq) - 1, 0, link_freq);
 	ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+	/* add V4L2_CID_EXPOSURE_AUTO */
+	v4l2_ctrl_new_std_menu(hdl, ops, V4L2_CID_EXPOSURE_AUTO, 1, ~0x3,
+			       V4L2_EXPOSURE_AUTO);
 
 	if (hdl->error) {
 		ret = hdl->error;
