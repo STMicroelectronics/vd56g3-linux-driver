@@ -28,6 +28,7 @@
 #define VD56G3_MODEL_ID					0x5603
 #define DEVICE_FWPATCH_REVISION				0x001e
 #define DEVICE_SYSTEM_FSM				0x0028
+#define SENSOR_READY_TO_BOOT				0x01
 #define SENSOR_SW_STBY					0x02
 #define SENSOR_STREAMING				0x03
 #define DEVICE_BOOT					0x0200
@@ -396,14 +397,13 @@ static void vd56g3_apply_reset(struct vd56g3_dev *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
 
-	/* FIXME : update when doc is clear */
 	dev_dbg(&client->dev, "%s", __func__);
 	gpiod_set_value_cansleep(sensor->reset_gpio, 0);
 	usleep_range(5000, 10000);
 	gpiod_set_value_cansleep(sensor->reset_gpio, 1);
 	usleep_range(5000, 10000);
 	gpiod_set_value_cansleep(sensor->reset_gpio, 0);
-	usleep_range(40000, 100000);
+	usleep_range(5000, 10000);
 }
 
 static int vd56g3_detect(struct vd56g3_dev *sensor)
@@ -411,6 +411,10 @@ static int vd56g3_detect(struct vd56g3_dev *sensor)
 	struct i2c_client *client = sensor->i2c_client;
 	u16 id = 0;
 	int ret;
+
+	ret = vd56g3_wait_state(sensor, SENSOR_READY_TO_BOOT);
+	if (ret)
+		return ret;
 
 	ret = vd56g3_read_reg16(sensor, DEVICE_MODEL_ID_REG, &id);
 	if (ret)
@@ -1206,7 +1210,7 @@ static int vd56g3_probe(struct i2c_client *client)
 	ret = clk_prepare_enable(sensor->xclk);
 	if (ret) {
 		dev_err(&client->dev, "failed to enable clock %d", ret);
-		goto entity_cleanup;
+		goto disable_bulk;
 	}
 
 	mutex_init(&sensor->lock);
@@ -1257,6 +1261,8 @@ static int vd56g3_probe(struct i2c_client *client)
 
 disable_clock:
 	clk_disable_unprepare(sensor->xclk);
+disable_bulk:
+	regulator_bulk_disable(VD56G3_NUM_SUPPLIES, sensor->supplies);
 entity_cleanup:
 	mutex_destroy(&sensor->lock);
 	media_entity_cleanup(&sensor->sd.entity);
