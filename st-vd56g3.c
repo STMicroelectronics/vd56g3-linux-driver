@@ -42,6 +42,7 @@
 #define DEVICE_CLK_PLL_PREDIV				0x0224
 #define DEVICE_CLK_SYS_PLL_MULT				0x0226
 #define DEVICE_LINE_LENGTH				0x0300
+#define DEVICE_ORIENTATION				0x0302
 #define DEVICE_FORMAT_CTRL				0x030a
 #define DEVICE_OIF_CTRL					0x030c
 #define DEVICE_OIF_IMG_CTRL				0x030f
@@ -121,6 +122,8 @@ struct vd56g3_dev {
 	struct v4l2_mbus_framefmt fmt;
 	const struct vd56g3_mode_info *current_mode;
 	struct v4l2_fract frame_interval;
+	bool hflip;
+	bool vflip;
 };
 
 /* helpers */
@@ -1088,9 +1091,24 @@ static int vd56g3_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 
 static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 {
+	struct v4l2_subdev *sd = ctrl_to_sd(ctrl);
+	struct vd56g3_dev *sensor = to_vd56g3_dev(sd);
 	int ret;
 
 	switch (ctrl->id) {
+	case V4L2_CID_VFLIP:
+	case V4L2_CID_HFLIP:
+		if (sensor->streaming) {
+			ret = -EBUSY;
+			break;
+		}
+		if (ctrl->id == V4L2_CID_VFLIP)
+			sensor->vflip = ctrl->val;
+		if (ctrl->id == V4L2_CID_HFLIP)
+			sensor->hflip = ctrl->val;
+		ret = vd56g3_write_reg(sensor, DEVICE_ORIENTATION,
+				       sensor->hflip | (sensor->vflip << 1));
+		break;
 	default:
 		ret = -EINVAL;
 		break;
@@ -1114,6 +1132,9 @@ static int vd56g3_init_controls(struct vd56g3_dev *sensor)
 	v4l2_ctrl_handler_init(hdl, 16);
 	/* we can use our own mutex for the ctrl lock */
 	hdl->lock = &sensor->lock;
+	/* add flipping */
+	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VFLIP, 0, 1, 1, 0);
+	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HFLIP, 0, 1, 1, 0);
 	/* add V4L2_CID_PIXEL_RATE */
 	ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_PIXEL_RATE, 1, INT_MAX, 1,
 				 get_pixel_rate(sensor));
