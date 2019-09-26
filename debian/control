@@ -1,0 +1,14 @@
+Source: st-vd56g3-st-dkms
+Maintainer: Mickael Guene <mickael.guene@st.com>
+Section: kernel
+Priority: optional
+Build-Depends: debhelper (>=9), dkms
+Standards-Version: 3.9.6
+Vcs-Git: ssh://gitolite@codex.cro.st.com/imgappliswlinuxdevplatform/v4l2/drivers/vd56g3.git
+
+Package: st-vd56g3-st-dkms
+Architecture: all
+Section: kernel
+Priority: optional
+Depends: ${misc:Depends}
+Description: DKMS source for the st-vd56g3 driver
