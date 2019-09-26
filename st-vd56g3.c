@@ -56,8 +56,9 @@
 #define DEVICE_EXP_MODE					0x044c
 #define DEVICE_MANUAL_ANALOG_GAIN			0x044d
 #define DEVICE_MANUAL_COARSE_EXPOSURE			0x044e
-#define DEVICE_MANUAL_DIGITAL_GAIN_LONG			0x0450
+#define DEVICE_MANUAL_DIGITAL_GAIN			0x0450
 #define EXP_MODE_AUTO					0
+#define EXP_MODE_FREEZE					1
 #define EXP_MODE_MANUAL					2
 #define DEVICE_FRAME_LENGTH				0x0458
 #define DEVICE_ROI_X_START				0x045e
@@ -496,6 +497,16 @@ static int vd56g3_update_exposure_auto(struct vd56g3_dev *sensor, u32 index)
 	return ret;
 }
 
+static int vd56g3_lock_exposure(struct vd56g3_dev *sensor, u32 is_lock)
+{
+	/* only exposure lock is supported */
+	if ((is_lock & 1) != is_lock)
+		return -EINVAL;
+
+	return vd56g3_write_reg(sensor, DEVICE_EXP_MODE,
+				is_lock ? EXP_MODE_FREEZE : EXP_MODE_AUTO);
+}
+
 static int vd56g3_update_gains(struct vd56g3_dev *sensor, u32 target)
 {
 	struct i2c_client *client = sensor->i2c_client;
@@ -519,7 +530,7 @@ static int vd56g3_update_gains(struct vd56g3_dev *sensor, u32 target)
 	ret = vd56g3_write_reg(sensor, DEVICE_MANUAL_ANALOG_GAIN, idx);
 	if (ret)
 		return ret;
-	ret = vd56g3_write_reg16(sensor, DEVICE_MANUAL_DIGITAL_GAIN_LONG,
+	ret = vd56g3_write_reg16(sensor, DEVICE_MANUAL_DIGITAL_GAIN,
 				 digital_gain);
 	if (ret)
 		return ret;
@@ -1267,6 +1278,9 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 		ret = vd56g3_set_exposure(sensor, ctrl->val);
 		ctrl->val = sensor->manual_expo_ms;
 		break;
+	case V4L2_CID_3A_LOCK:
+		ret = vd56g3_lock_exposure(sensor, ctrl->val);
+		break;
 	default:
 		ret = -EINVAL;
 		break;
@@ -1311,6 +1325,8 @@ static int vd56g3_init_controls(struct vd56g3_dev *sensor)
 	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_GAIN, 0, 0x3fff, 1, 0x100);
 	/* V4L2_CID_EXPOSURE */
 	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_EXPOSURE, 1, 500, 1, 10);
+	/* V4L2_CID_3A_LOCK */
+	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_3A_LOCK, 0, 7, 0, 0);
 
 	if (hdl->error) {
 		ret = hdl->error;
