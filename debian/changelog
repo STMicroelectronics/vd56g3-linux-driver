@@ -1,5 +1,5 @@
-st-vd56g3-st-dkms (0.1.0) UNRELEASED; urgency=medium
+st-vd56g3-st-dkms (0.1.0) buster; urgency=medium
 
-  * Unreleased
+  * Initial release
 
- -- Mickael Guene <mickael.guene@st.com>  Thu, 26 Sep 2019 10:21:04 +0200
+ -- Mickael Guene <mickael.guene@st.com>  Thu, 26 Sep 2019 12:45:25 +0200
