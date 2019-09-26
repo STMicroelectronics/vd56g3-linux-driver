@@ -55,6 +55,7 @@
 #define DEVICE_PATGEN_CTRL				0x0400
 #define DEVICE_EXP_MODE					0x044c
 #define DEVICE_MANUAL_ANALOG_GAIN			0x044d
+#define DEVICE_MANUAL_COARSE_EXPOSURE			0x044e
 #define DEVICE_MANUAL_DIGITAL_GAIN_LONG			0x0450
 #define EXP_MODE_AUTO					0
 #define EXP_MODE_MANUAL					2
@@ -147,6 +148,7 @@ struct vd56g3_dev {
 	struct v4l2_fract frame_interval;
 	bool hflip;
 	bool vflip;
+	int manual_expo_ms;
 };
 
 /* helpers */
@@ -419,6 +421,51 @@ static int vd56g3_get_regulators(struct vd56g3_dev *sensor)
 				       sensor->supplies);
 }
 
+static bool is_expo_valid(struct vd56g3_dev *sensor, int frame_length,
+			  int line_n, int *expo_ms)
+{
+	/* FIXME : formulae need to be updated */
+	if (line_n < frame_length - 100)
+		return true;
+
+	*expo_ms = *expo_ms - 1;
+
+	return false;
+}
+
+static int apply_exposure(struct vd56g3_dev *sensor)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	u16 frame_length;
+	int line_duration_ns;
+	int expo_line_nb;
+	int ret;
+	int expo_ms = sensor->manual_expo_ms;
+
+	dev_dbg(&client->dev, "%s request expo %d ms", __func__, expo_ms);
+	ret = vd56g3_read_reg16(sensor, DEVICE_FRAME_LENGTH, &frame_length);
+	if (ret)
+		return ret;
+	line_duration_ns = div64_u64((u64)sensor->line_length * 1000000000,
+				     sensor->pclk);
+
+	do {
+		expo_line_nb = (expo_ms * 1000000 + line_duration_ns / 2) /
+				    line_duration_ns;
+		expo_line_nb = max(1, expo_line_nb);
+	} while (!is_expo_valid(sensor, frame_length, expo_line_nb, &expo_ms));
+
+	ret = vd56g3_write_reg16(sensor, DEVICE_MANUAL_COARSE_EXPOSURE,
+				 expo_line_nb);
+	if (ret)
+		return ret;
+
+	dev_dbg(&client->dev, "%s applied expo %d ms", __func__, expo_ms);
+	sensor->manual_expo_ms = expo_ms;
+
+	return 0;
+}
+
 static int vd56g3_update_patgen(struct vd56g3_dev *sensor, u32 index)
 {
 	u32 pattern = index <= 3 ? index : index + 12;
@@ -482,6 +529,15 @@ static int vd56g3_update_gains(struct vd56g3_dev *sensor, u32 target)
 	dev_dbg(&client->dev, "     digital is 0x%04x", digital_gain);
 	dev_dbg(&client->dev, "Applied gain is 0x%04x",
 		   (analog_gains[idx] * digital_gain) / 256);
+
+	return 0;
+}
+
+static int vd56g3_set_exposure(struct vd56g3_dev *sensor, int expo_ms)
+{
+	sensor->manual_expo_ms = expo_ms;
+	if (sensor->streaming)
+		return apply_exposure(sensor);
 
 	return 0;
 }
@@ -609,6 +665,11 @@ static int vd56g3_stream_enable(struct vd56g3_dev *sensor)
 
 	/* configure frame rate */
 	ret = set_frame_rate(sensor);
+	if (ret)
+		return ret;
+
+	/* apply exposure */
+	ret = apply_exposure(sensor);
 	if (ret)
 		return ret;
 
@@ -1202,6 +1263,10 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_GAIN:
 		ret = vd56g3_update_gains(sensor, ctrl->val);
 		break;
+	case V4L2_CID_EXPOSURE:
+		ret = vd56g3_set_exposure(sensor, ctrl->val);
+		ctrl->val = sensor->manual_expo_ms;
+		break;
 	default:
 		ret = -EINVAL;
 		break;
@@ -1244,6 +1309,8 @@ static int vd56g3_init_controls(struct vd56g3_dev *sensor)
 			       V4L2_EXPOSURE_AUTO);
 	/* V4L2_CID_GAIN. This is 8.8 fixed point value */
 	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_GAIN, 0, 0x3fff, 1, 0x100);
+	/* V4L2_CID_EXPOSURE */
+	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_EXPOSURE, 1, 500, 1, 10);
 
 	if (hdl->error) {
 		ret = hdl->error;
@@ -1276,6 +1343,7 @@ static int vd56g3_probe(struct i2c_client *client)
 	sensor->fmt.colorspace = V4L2_COLORSPACE_SRGB;
 	sensor->frame_interval.numerator = 1;
 	sensor->frame_interval.denominator = 15;
+	sensor->manual_expo_ms = 10;
 
 	endpoint = fwnode_graph_get_next_endpoint(
 		of_fwnode_handle(dev->of_node), NULL);
