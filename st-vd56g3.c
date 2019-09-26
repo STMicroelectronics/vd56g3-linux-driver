@@ -127,6 +127,12 @@ static const struct vd56g3_mode_info vd56g3_mode_data[] = {
 	{240, 320, 2},
 };
 
+enum vd56g3_expo_state {
+	VD56G3_EXPO_AUTO,
+	VD56G3_EXPO_AUTO_FREEZE,
+	VD56G3_EXPO_MANUAL
+};
+
 struct vd56g3_dev {
 	struct i2c_client *i2c_client;
 	struct v4l2_subdev sd;
@@ -150,6 +156,7 @@ struct vd56g3_dev {
 	bool hflip;
 	bool vflip;
 	int manual_expo_ms;
+	enum vd56g3_expo_state expo_state;
 };
 
 /* helpers */
@@ -483,12 +490,19 @@ static int vd56g3_update_exposure_auto(struct vd56g3_dev *sensor, u32 index)
 {
 	int ret;
 
+	/* VD56G3_EXPO_AUTO_FREEZE => VD56G3_EXPO_MANUAL is invalid */
+	if (sensor->expo_state == VD56G3_EXPO_AUTO_FREEZE &&
+	    index == V4L2_EXPOSURE_MANUAL)
+		return -EINVAL;
+
 	switch (index) {
 	case V4L2_EXPOSURE_AUTO:
 		ret = vd56g3_write_reg(sensor, DEVICE_EXP_MODE, EXP_MODE_AUTO);
+		sensor->expo_state = VD56G3_EXPO_AUTO;
 		break;
 	case V4L2_EXPOSURE_MANUAL:
 		ret = vd56g3_write_reg(sensor, DEVICE_EXP_MODE, EXP_MODE_MANUAL);
+		sensor->expo_state = VD56G3_EXPO_MANUAL;
 		break;
 	default:
 		ret = -EINVAL;
@@ -501,6 +515,10 @@ static int vd56g3_lock_exposure(struct vd56g3_dev *sensor, u32 is_lock)
 {
 	/* only exposure lock is supported */
 	if ((is_lock & 1) != is_lock)
+		return -EINVAL;
+
+	/* we can't lock / unlock if we are in manual mode */
+	if (sensor->expo_state == VD56G3_EXPO_MANUAL)
 		return -EINVAL;
 
 	return vd56g3_write_reg(sensor, DEVICE_EXP_MODE,
@@ -1360,6 +1378,7 @@ static int vd56g3_probe(struct i2c_client *client)
 	sensor->frame_interval.numerator = 1;
 	sensor->frame_interval.denominator = 15;
 	sensor->manual_expo_ms = 10;
+	sensor->expo_state = VD56G3_EXPO_AUTO;
 
 	endpoint = fwnode_graph_get_next_endpoint(
 		of_fwnode_handle(dev->of_node), NULL);
