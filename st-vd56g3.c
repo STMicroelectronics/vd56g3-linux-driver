@@ -65,7 +65,7 @@
 #define DEVICE_ROI_X_END				0x0460
 #define DEVICE_ROI_Y_START				0x0462
 #define DEVICE_ROI_Y_END				0x0464
-#define DEVICE_READOUT_CTRL				0x048c
+#define DEVICE_READOUT_CTRL				0x048e
 
 #define SENSOR_WIDTH					1124
 #define SENSOR_HEIGHT					1364
