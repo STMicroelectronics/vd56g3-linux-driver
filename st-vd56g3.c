@@ -83,6 +83,7 @@ static const char * const vd56g3_supply_name[] = {
 	"VDDIO",
 	"VANA",
 };
+
 #define VD56G3_NUM_SUPPLIES		ARRAY_SIZE(vd56g3_supply_name)
 
 static const s64 link_freq[] = {
@@ -501,7 +502,8 @@ static int vd56g3_update_exposure_auto(struct vd56g3_dev *sensor, u32 index)
 		sensor->expo_state = VD56G3_EXPO_AUTO;
 		break;
 	case V4L2_EXPOSURE_MANUAL:
-		ret = vd56g3_write_reg(sensor, DEVICE_EXP_MODE, EXP_MODE_MANUAL);
+		ret = vd56g3_write_reg(sensor, DEVICE_EXP_MODE,
+				       EXP_MODE_MANUAL);
 		sensor->expo_state = VD56G3_EXPO_MANUAL;
 		break;
 	default:
@@ -557,7 +559,7 @@ static int vd56g3_update_gains(struct vd56g3_dev *sensor, u32 target)
 	dev_dbg(&client->dev, "      analog is 0x%04x", analog_gains[idx]);
 	dev_dbg(&client->dev, "     digital is 0x%04x", digital_gain);
 	dev_dbg(&client->dev, "Applied gain is 0x%04x",
-		   (analog_gains[idx] * digital_gain) / 256);
+		(analog_gains[idx] * digital_gain) / 256);
 
 	return 0;
 }
@@ -612,7 +614,7 @@ static int vd56g3_try_fmt_internal(struct v4l2_subdev *sd,
 {
 	const struct vd56g3_mode_info *mode = vd56g3_mode_data;
 	unsigned int index;
-	unsigned i;
+	unsigned int i;
 
 	/* select code */
 	for (index = 0; index < ARRAY_SIZE(vd56g3_supported_codes); index++) {
@@ -737,7 +739,7 @@ static int vd56g3_stream_disable(struct vd56g3_dev *sensor)
 	return 0;
 }
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4,20,0)
+#if KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE
 static int vd56g3_rx_from_ep(struct vd56g3_dev *sensor,
 			     struct fwnode_handle *endpoint)
 {
@@ -1006,7 +1008,7 @@ static int vd56g3_s_stream(struct v4l2_subdev *sd, int enable)
 
 	mutex_lock(&sensor->lock);
 	dev_dbg(&client->dev, "%s : requested %d / current = %d", __func__,
-		   enable, sensor->streaming);
+		enable, sensor->streaming);
 	if (sensor->streaming == enable)
 		goto out;
 
@@ -1017,7 +1019,7 @@ static int vd56g3_s_stream(struct v4l2_subdev *sd, int enable)
 
 out:
 	dev_dbg(&client->dev, "%s current now = %d / %d", __func__,
-		   sensor->streaming, ret);
+		sensor->streaming, ret);
 	mutex_unlock(&sensor->lock);
 
 	return ret;
