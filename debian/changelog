@@ -1,3 +1,9 @@
+st-vd56g3-st-dkms (0.3.0) UNRELEASED; urgency=medium
+
+  * unreleased
+
+ -- Mickael Guene <mickael.guene@st.com>  Thu, 17 Oct 2019 11:25:04 +0200
+
 st-vd56g3-st-dkms (0.2.0) buster; urgency=medium
 
   * Fix bad READOUT_CTRL address in documentation
