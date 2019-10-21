@@ -709,7 +709,7 @@ static int vd56g3_stream_enable(struct vd56g3_dev *sensor)
 	if (ret)
 		return ret;
 
-	ret = vd56g3_poll_reg(sensor, DEVICE_STREAMING, 0);
+	ret = vd56g3_poll_reg(sensor, DEVICE_SW_STBY, 0);
 	if (ret)
 		return ret;
 
