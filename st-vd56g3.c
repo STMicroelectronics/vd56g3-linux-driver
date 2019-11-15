@@ -31,11 +31,13 @@
 #define SENSOR_READY_TO_BOOT				0x01
 #define SENSOR_SW_STBY					0x02
 #define SENSOR_STREAMING				0x03
+#define DEVICE_TEMPERATURE				0x004c
 #define DEVICE_BOOT					0x0200
 #define CMD_BOOT					1
 #define CMD_PATCH_SETUP					2
 #define DEVICE_SW_STBY					0x0201
 #define CMD_START_STREAM				1
+#define CMD_THSENS_READ					4
 #define DEVICE_STREAMING				0x0202
 #define CMD_STOP_STREAM					1
 #define DEVICE_EXT_CLOCK				0x0220
@@ -87,6 +89,8 @@
 #define V4L2_CID_GPIO5_MODE			(V4L2_CID_USER_BASE | 0x1015)
 #define V4L2_CID_GPIO6_MODE			(V4L2_CID_USER_BASE | 0x1016)
 #define V4L2_CID_GPIO7_MODE			(V4L2_CID_USER_BASE | 0x1017)
+
+#define V4L2_CID_TEMPERATURE			(V4L2_CID_USER_BASE | 0x1020)
 
 #include "st-vd56g3_patch.c"
 
@@ -558,6 +562,46 @@ static int vd56g3_update_gpiox_strobe_mode(struct vd56g3_dev *sensor, u32 mode,
 	u8 regs[ARRAY_SIZE(vd56g3_gpios_modes)] = {0x01, 0x02, 0x22};
 
 	return vd56g3_write_reg(sensor, DEVICE_GPIO_0_CTRL + idx, regs[mode]);
+}
+
+static int vd56g3_get_temp_stream_enable(struct vd56g3_dev *sensor, int *temp)
+{
+	int ret;
+	int16_t temperature;
+
+	ret = vd56g3_read_reg16(sensor, DEVICE_TEMPERATURE,
+				(u16 *) &temperature);
+	if (ret)
+		return ret;
+	/* temperature is signed 10 bits value. extend sign */
+	temperature = (temperature << 6) >> 6;
+	*temp = temperature;
+
+	return 0;
+}
+
+static int vd56g3_get_temp_stream_disable(struct vd56g3_dev *sensor, int *temp)
+{
+	int ret;
+
+	/* request temperature read */
+	ret = vd56g3_write_reg(sensor, DEVICE_SW_STBY, CMD_THSENS_READ);
+	if (ret)
+		return ret;
+	ret = vd56g3_poll_reg(sensor, DEVICE_SW_STBY, 0);
+	if (ret)
+		return ret;
+
+	return vd56g3_get_temp_stream_enable(sensor, temp);
+}
+
+static int vd56g3_get_temp(struct vd56g3_dev *sensor, int *temp)
+{
+	*temp = 0;
+	if (sensor->streaming)
+		return vd56g3_get_temp_stream_enable(sensor, temp);
+	else
+		return vd56g3_get_temp_stream_disable(sensor, temp);
 }
 
 static int vd56g3_update_gains(struct vd56g3_dev *sensor, u32 target)
@@ -1301,11 +1345,18 @@ static int vd56g3_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct v4l2_subdev *sd = ctrl_to_sd(ctrl);
 	struct vd56g3_dev *sensor = to_vd56g3_dev(sd);
+	int temperature;
 	int ret;
 
 	switch (ctrl->id) {
 	case V4L2_CID_PIXEL_RATE:
 		ret = __v4l2_ctrl_s_ctrl_int64(ctrl, get_pixel_rate(sensor));
+		break;
+	case V4L2_CID_TEMPERATURE:
+		ret = vd56g3_get_temp(sensor, &temperature);
+		if (ret)
+			break;
+		ret = __v4l2_ctrl_s_ctrl(ctrl, temperature);
 		break;
 	default:
 		ret = -EINVAL;
@@ -1448,6 +1499,16 @@ static const struct v4l2_ctrl_config vd56g3_gpio7_ctrl = {
 	.qmenu		= vd56g3_gpios_modes,
 };
 
+static const struct v4l2_ctrl_config vd56g3_temp_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_TEMPERATURE,
+	.name		= "Temperature in celsius",
+	.type		= V4L2_CTRL_TYPE_INTEGER,
+	.min		= -1024,
+	.max		= 1023,
+	.step		= 1,
+};
+
 static int vd56g3_init_controls(struct vd56g3_dev *sensor)
 {
 	const struct v4l2_ctrl_ops *ops = &vd56g3_ctrl_ops;
@@ -1490,6 +1551,9 @@ static int vd56g3_init_controls(struct vd56g3_dev *sensor)
 	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio5_ctrl, NULL);
 	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio6_ctrl, NULL);
 	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio7_ctrl, NULL);
+	/* temperature */
+	ctrl = v4l2_ctrl_new_custom(hdl, &vd56g3_temp_ctrl, NULL);
+	ctrl->flags |= V4L2_CTRL_FLAG_VOLATILE | V4L2_CTRL_FLAG_READ_ONLY;
 
 	if (hdl->error) {
 		ret = hdl->error;
