@@ -46,6 +46,7 @@
 #define DEVICE_FORMAT_CTRL				0x030a
 #define DEVICE_OIF_CTRL					0x030c
 #define DEVICE_OIF_IMG_CTRL				0x030f
+#define DEVICE_OIF_ISL_CTRL				0x0310
 #define DEVICE_OIF_CSI_BITRATE				0x0312
 #define DEVICE_ISL_ENABLE				0x0333
 #define DEVICE_OUTPUT_CTRL				0x0334
@@ -131,6 +132,7 @@ struct vd56g3_mode_info {
 	u32 width;
 	u32 height;
 	int bin_mode;
+	int is_isl;
 };
 
 static const u32 vd56g3_supported_codes[] = {
@@ -141,14 +143,14 @@ static const u32 vd56g3_supported_codes[] = {
 const int vd56g3_sensor_frame_rates[] = { 90, 60, 50, 30, 25, 15, 10, 5, 1 };
 
 static const struct vd56g3_mode_info vd56g3_mode_data[] = {
-	{1124, 1364, 0},
-	{1024, 1280, 0},
-	{1024, 1024, 0},
-	{480, 640, 1},
-	{640, 480, 0},
-	{400, 400, 1},
-	{320, 240, 1},
-	{240, 320, 2},
+	{1124, 1366, 0, 1}, {1124, 1364, 0, 0},
+	{1024, 1282, 0, 1}, {1024, 1280, 0, 0},
+	{1024, 1026, 0, 1}, {1024, 1024, 0, 0},
+	{ 720, 1282, 0, 1}, { 720, 1280, 0, 0},
+	{ 480,  642, 1, 1}, { 480,  640, 1, 0},
+	{ 640,  482, 0, 1}, { 640,  480, 0, 0},
+	{ 320,  242, 1, 1}, { 320,  240, 1, 0},
+	{ 240,  320, 2, 0},
 };
 
 enum vd56g3_expo_state {
@@ -688,10 +690,14 @@ static int vd56g3_stream_enable(struct vd56g3_dev *sensor)
 {
 	int center_x = SENSOR_WIDTH / 2;
 	int center_y = SENSOR_HEIGHT / 2;
+	int is_isl = sensor->current_mode->is_isl;
 	int scale = 1 << sensor->current_mode->bin_mode;
 	int width = sensor->current_mode->width * scale;
 	int height = sensor->current_mode->height * scale;
 	int ret;
+
+	if (is_isl)
+		width -= 2 *scale;
 
 	/* configure output mode */
 	ret = vd56g3_write_reg(sensor, DEVICE_FORMAT_CTRL,
@@ -700,6 +706,12 @@ static int vd56g3_stream_enable(struct vd56g3_dev *sensor)
 		return ret;
 	ret = vd56g3_write_reg(sensor, DEVICE_OIF_IMG_CTRL,
 			       get_datatype_by_code(sensor->fmt.code));
+	if (ret)
+		return ret;
+	ret = vd56g3_write_reg(sensor, DEVICE_OIF_ISL_CTRL, is_isl ?
+			       get_datatype_by_code(sensor->fmt.code) :
+			       0x12);
+	ret = vd56g3_write_reg(sensor, DEVICE_ISL_ENABLE, is_isl);
 	if (ret)
 		return ret;
 
