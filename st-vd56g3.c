@@ -555,7 +555,7 @@ static int vd56g3_lock_exposure(struct vd56g3_dev *sensor, u32 is_lock)
 static int vd56g3_update_gpiox_strobe_mode(struct vd56g3_dev *sensor, u32 mode,
 					   int idx)
 {
-	u8 regs[ARRAY_SIZE(vd56g3_gpios_modes)] = {0x01, 0x03, 0x23};
+	u8 regs[ARRAY_SIZE(vd56g3_gpios_modes)] = {0x01, 0x02, 0x22};
 
 	return vd56g3_write_reg(sensor, DEVICE_GPIO_0_CTRL + idx, regs[mode]);
 }
