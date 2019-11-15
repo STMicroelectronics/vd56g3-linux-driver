@@ -65,16 +65,39 @@
 #define DEVICE_ROI_X_END				0x0460
 #define DEVICE_ROI_Y_START				0x0462
 #define DEVICE_ROI_Y_END				0x0464
+#define DEVICE_GPIO_0_CTRL				0x0467
+#define DEVICE_GPIO_1_CTRL				0x0468
+#define DEVICE_GPIO_2_CTRL				0x0469
+#define DEVICE_GPIO_3_CTRL				0x046a
+#define DEVICE_GPIO_4_CTRL				0x046b
+#define DEVICE_GPIO_5_CTRL				0x046c
+#define DEVICE_GPIO_6_CTRL				0x046d
+#define DEVICE_GPIO_7_CTRL				0x046e
 #define DEVICE_READOUT_CTRL				0x048e
 
 #define SENSOR_WIDTH					1124
 #define SENSOR_HEIGHT					1364
+
+#define V4L2_CID_GPIO0_MODE			(V4L2_CID_USER_BASE | 0x1010)
+#define V4L2_CID_GPIO1_MODE			(V4L2_CID_USER_BASE | 0x1011)
+#define V4L2_CID_GPIO2_MODE			(V4L2_CID_USER_BASE | 0x1012)
+#define V4L2_CID_GPIO3_MODE			(V4L2_CID_USER_BASE | 0x1013)
+#define V4L2_CID_GPIO4_MODE			(V4L2_CID_USER_BASE | 0x1014)
+#define V4L2_CID_GPIO5_MODE			(V4L2_CID_USER_BASE | 0x1015)
+#define V4L2_CID_GPIO6_MODE			(V4L2_CID_USER_BASE | 0x1016)
+#define V4L2_CID_GPIO7_MODE			(V4L2_CID_USER_BASE | 0x1017)
 
 #include "st-vd56g3_patch.c"
 
 static const char * const vd56g3_test_pattern_menu[] = {
 	"Disabled", "Solid", "Colorbar", "Gradbar",
 	"Hgrey", "Vgrey", "Dgrey", "PN28"
+};
+
+static const char * const vd56g3_gpios_modes[] = {
+	"disabled",
+	"strobe envelope positive",
+	"strobe envelope negative",
 };
 
 /* regulator supplies */
@@ -527,6 +550,14 @@ static int vd56g3_lock_exposure(struct vd56g3_dev *sensor, u32 is_lock)
 				is_lock ? EXP_MODE_FREEZE : EXP_MODE_AUTO);
 }
 
+static int vd56g3_update_gpiox_strobe_mode(struct vd56g3_dev *sensor, u32 mode,
+					   int idx)
+{
+	u8 regs[ARRAY_SIZE(vd56g3_gpios_modes)] = {0x01, 0x03, 0x23};
+
+	return vd56g3_write_reg(sensor, DEVICE_GPIO_0_CTRL + idx, regs[mode]);
+}
+
 static int vd56g3_update_gains(struct vd56g3_dev *sensor, u32 target)
 {
 	struct i2c_client *client = sensor->i2c_client;
@@ -953,6 +984,7 @@ static int vd56g3_configure(struct vd56g3_dev *sensor)
 	struct i2c_client *client = sensor->i2c_client;
 	unsigned int prediv;
 	unsigned int mult;
+	unsigned int i;
 	int ret;
 
 	compute_pll_parameters_by_freq(sensor->clk_freq, &prediv, &mult);
@@ -988,6 +1020,12 @@ static int vd56g3_configure(struct vd56g3_dev *sensor)
 	ret = vd56g3_write_reg(sensor, DEVICE_EXP_MODE, EXP_MODE_AUTO);
 	if (ret)
 		return ret;
+	/* gpios in input (disabled) by default */
+	for (i = 0; i < 8; i++) {
+		ret = vd56g3_write_reg(sensor, DEVICE_GPIO_0_CTRL + i, 0x01);
+		if (ret)
+			return ret;
+	}
 
 	sensor->data_rate_in_mbps = (mult * sensor->clk_freq) / prediv;
 	sensor->pclk = (sensor->data_rate_in_mbps * 2) / 10;
@@ -1301,6 +1339,17 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_3A_LOCK:
 		ret = vd56g3_lock_exposure(sensor, ctrl->val);
 		break;
+	case V4L2_CID_GPIO0_MODE:
+	case V4L2_CID_GPIO1_MODE:
+	case V4L2_CID_GPIO2_MODE:
+	case V4L2_CID_GPIO3_MODE:
+	case V4L2_CID_GPIO4_MODE:
+	case V4L2_CID_GPIO5_MODE:
+	case V4L2_CID_GPIO6_MODE:
+	case V4L2_CID_GPIO7_MODE:
+		ret = vd56g3_update_gpiox_strobe_mode(sensor, ctrl->val,
+			ctrl->id - V4L2_CID_GPIO0_MODE);
+		break;
 	default:
 		ret = -EINVAL;
 		break;
@@ -1312,6 +1361,79 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 static const struct v4l2_ctrl_ops vd56g3_ctrl_ops = {
 	.g_volatile_ctrl = vd56g3_g_volatile_ctrl,
 	.s_ctrl = vd56g3_s_ctrl,
+};
+
+/* FIXME: better add a macro here ? */
+static const struct v4l2_ctrl_config vd56g3_gpio0_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_GPIO0_MODE,
+	.name		= "Gpio0 mode",
+	.type		= V4L2_CTRL_TYPE_MENU,
+	.max		= ARRAY_SIZE(vd56g3_gpios_modes) - 1,
+	.qmenu		= vd56g3_gpios_modes,
+};
+
+static const struct v4l2_ctrl_config vd56g3_gpio1_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_GPIO1_MODE,
+	.name		= "Gpio1 mode",
+	.type		= V4L2_CTRL_TYPE_MENU,
+	.max		= ARRAY_SIZE(vd56g3_gpios_modes) - 1,
+	.qmenu		= vd56g3_gpios_modes,
+};
+
+static const struct v4l2_ctrl_config vd56g3_gpio2_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_GPIO2_MODE,
+	.name		= "Gpio2 mode",
+	.type		= V4L2_CTRL_TYPE_MENU,
+	.max		= ARRAY_SIZE(vd56g3_gpios_modes) - 1,
+	.qmenu		= vd56g3_gpios_modes,
+};
+
+static const struct v4l2_ctrl_config vd56g3_gpio3_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_GPIO3_MODE,
+	.name		= "Gpio3 mode",
+	.type		= V4L2_CTRL_TYPE_MENU,
+	.max		= ARRAY_SIZE(vd56g3_gpios_modes) - 1,
+	.qmenu		= vd56g3_gpios_modes,
+};
+
+static const struct v4l2_ctrl_config vd56g3_gpio4_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_GPIO4_MODE,
+	.name		= "Gpio4 mode",
+	.type		= V4L2_CTRL_TYPE_MENU,
+	.max		= ARRAY_SIZE(vd56g3_gpios_modes) - 1,
+	.qmenu		= vd56g3_gpios_modes,
+};
+
+static const struct v4l2_ctrl_config vd56g3_gpio5_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_GPIO5_MODE,
+	.name		= "Gpio5 mode",
+	.type		= V4L2_CTRL_TYPE_MENU,
+	.max		= ARRAY_SIZE(vd56g3_gpios_modes) - 1,
+	.qmenu		= vd56g3_gpios_modes,
+};
+
+static const struct v4l2_ctrl_config vd56g3_gpio6_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_GPIO6_MODE,
+	.name		= "Gpio6 mode",
+	.type		= V4L2_CTRL_TYPE_MENU,
+	.max		= ARRAY_SIZE(vd56g3_gpios_modes) - 1,
+	.qmenu		= vd56g3_gpios_modes,
+};
+
+static const struct v4l2_ctrl_config vd56g3_gpio7_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_GPIO7_MODE,
+	.name		= "Gpio7 mode",
+	.type		= V4L2_CTRL_TYPE_MENU,
+	.max		= ARRAY_SIZE(vd56g3_gpios_modes) - 1,
+	.qmenu		= vd56g3_gpios_modes,
 };
 
 static int vd56g3_init_controls(struct vd56g3_dev *sensor)
@@ -1347,6 +1469,15 @@ static int vd56g3_init_controls(struct vd56g3_dev *sensor)
 	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_EXPOSURE, 1, 500, 1, 10);
 	/* V4L2_CID_3A_LOCK */
 	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_3A_LOCK, 0, 7, 0, 0);
+	/* gpios stuff */
+	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio0_ctrl, NULL);
+	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio1_ctrl, NULL);
+	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio2_ctrl, NULL);
+	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio3_ctrl, NULL);
+	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio4_ctrl, NULL);
+	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio5_ctrl, NULL);
+	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio6_ctrl, NULL);
+	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio7_ctrl, NULL);
 
 	if (hdl->error) {
 		ret = hdl->error;
