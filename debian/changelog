@@ -1,3 +1,9 @@
+st-vd56g3-st-dkms (0.4.0) UNRELEASED; urgency=medium
+
+  * unreleased 
+
+ -- Mickael Guene <mickael.guene@st.com>  Mon, 25 Nov 2019 08:01:09 +0100
+
 st-vd56g3-st-dkms (0.3.0) buster; urgency=medium
 
   * Update supported frame rates
