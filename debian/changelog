@@ -1,8 +1,11 @@
-st-vd56g3-st-dkms (0.3.0) UNRELEASED; urgency=medium
+st-vd56g3-st-dkms (0.3.0) buster; urgency=medium
 
-  * unreleased
+  * Update supported frame rates
+  * Add gpio control
+  * Add formats with isl ouput
+  * Add temperature control
 
- -- Mickael Guene <mickael.guene@st.com>  Thu, 17 Oct 2019 11:25:04 +0200
+ -- Mickael Guene <mickael.guene@st.com>  Mon, 25 Nov 2019 07:53:22 +0100
 
 st-vd56g3-st-dkms (0.2.0) buster; urgency=medium
 
