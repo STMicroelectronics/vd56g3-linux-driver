@@ -31,11 +31,13 @@
 #define SENSOR_READY_TO_BOOT				0x01
 #define SENSOR_SW_STBY					0x02
 #define SENSOR_STREAMING				0x03
+#define DEVICE_TEMPERATURE				0x004c
 #define DEVICE_BOOT					0x0200
 #define CMD_BOOT					1
 #define CMD_PATCH_SETUP					2
 #define DEVICE_SW_STBY					0x0201
 #define CMD_START_STREAM				1
+#define CMD_THSENS_READ					4
 #define DEVICE_STREAMING				0x0202
 #define CMD_STOP_STREAM					1
 #define DEVICE_EXT_CLOCK				0x0220
@@ -46,6 +48,7 @@
 #define DEVICE_FORMAT_CTRL				0x030a
 #define DEVICE_OIF_CTRL					0x030c
 #define DEVICE_OIF_IMG_CTRL				0x030f
+#define DEVICE_OIF_ISL_CTRL				0x0310
 #define DEVICE_OIF_CSI_BITRATE				0x0312
 #define DEVICE_ISL_ENABLE				0x0333
 #define DEVICE_OUTPUT_CTRL				0x0334
@@ -65,16 +68,41 @@
 #define DEVICE_ROI_X_END				0x0460
 #define DEVICE_ROI_Y_START				0x0462
 #define DEVICE_ROI_Y_END				0x0464
+#define DEVICE_GPIO_0_CTRL				0x0467
+#define DEVICE_GPIO_1_CTRL				0x0468
+#define DEVICE_GPIO_2_CTRL				0x0469
+#define DEVICE_GPIO_3_CTRL				0x046a
+#define DEVICE_GPIO_4_CTRL				0x046b
+#define DEVICE_GPIO_5_CTRL				0x046c
+#define DEVICE_GPIO_6_CTRL				0x046d
+#define DEVICE_GPIO_7_CTRL				0x046e
 #define DEVICE_READOUT_CTRL				0x048e
 
 #define SENSOR_WIDTH					1124
 #define SENSOR_HEIGHT					1364
+
+#define V4L2_CID_GPIO0_MODE			(V4L2_CID_USER_BASE | 0x1010)
+#define V4L2_CID_GPIO1_MODE			(V4L2_CID_USER_BASE | 0x1011)
+#define V4L2_CID_GPIO2_MODE			(V4L2_CID_USER_BASE | 0x1012)
+#define V4L2_CID_GPIO3_MODE			(V4L2_CID_USER_BASE | 0x1013)
+#define V4L2_CID_GPIO4_MODE			(V4L2_CID_USER_BASE | 0x1014)
+#define V4L2_CID_GPIO5_MODE			(V4L2_CID_USER_BASE | 0x1015)
+#define V4L2_CID_GPIO6_MODE			(V4L2_CID_USER_BASE | 0x1016)
+#define V4L2_CID_GPIO7_MODE			(V4L2_CID_USER_BASE | 0x1017)
+
+#define V4L2_CID_TEMPERATURE			(V4L2_CID_USER_BASE | 0x1020)
 
 #include "st-vd56g3_patch.c"
 
 static const char * const vd56g3_test_pattern_menu[] = {
 	"Disabled", "Solid", "Colorbar", "Gradbar",
 	"Hgrey", "Vgrey", "Dgrey", "PN28"
+};
+
+static const char * const vd56g3_gpios_modes[] = {
+	"disabled",
+	"strobe envelope positive",
+	"strobe envelope negative",
 };
 
 /* regulator supplies */
@@ -108,6 +136,7 @@ struct vd56g3_mode_info {
 	u32 width;
 	u32 height;
 	int bin_mode;
+	int is_isl;
 };
 
 static const u32 vd56g3_supported_codes[] = {
@@ -115,17 +144,17 @@ static const u32 vd56g3_supported_codes[] = {
 	MEDIA_BUS_FMT_SGBRG10_1X10
 };
 
-const int vd56g3_sensor_frame_rates[] = { 60, 50, 30, 15, 10, 5, 2 };
+const int vd56g3_sensor_frame_rates[] = { 90, 60, 50, 30, 25, 15, 10, 5, 1 };
 
 static const struct vd56g3_mode_info vd56g3_mode_data[] = {
-	{1124, 1364, 0},
-	{1024, 1280, 0},
-	{1024, 1024, 0},
-	{480, 640, 1},
-	{640, 480, 0},
-	{400, 400, 1},
-	{320, 240, 1},
-	{240, 320, 2},
+	{1124, 1366, 0, 1}, {1124, 1364, 0, 0},
+	{1024, 1282, 0, 1}, {1024, 1280, 0, 0},
+	{1024, 1026, 0, 1}, {1024, 1024, 0, 0},
+	{ 720, 1282, 0, 1}, { 720, 1280, 0, 0},
+	{ 640,  482, 0, 1}, { 640,  480, 0, 0},
+	{ 480,  642, 1, 1}, { 480,  640, 1, 0},
+	{ 320,  242, 1, 1}, { 320,  240, 1, 0},
+	{ 240,  320, 2, 0},
 };
 
 enum vd56g3_expo_state {
@@ -527,6 +556,54 @@ static int vd56g3_lock_exposure(struct vd56g3_dev *sensor, u32 is_lock)
 				is_lock ? EXP_MODE_FREEZE : EXP_MODE_AUTO);
 }
 
+static int vd56g3_update_gpiox_strobe_mode(struct vd56g3_dev *sensor, u32 mode,
+					   int idx)
+{
+	u8 regs[ARRAY_SIZE(vd56g3_gpios_modes)] = {0x01, 0x02, 0x22};
+
+	return vd56g3_write_reg(sensor, DEVICE_GPIO_0_CTRL + idx, regs[mode]);
+}
+
+static int vd56g3_get_temp_stream_enable(struct vd56g3_dev *sensor, int *temp)
+{
+	int ret;
+	int16_t temperature;
+
+	ret = vd56g3_read_reg16(sensor, DEVICE_TEMPERATURE,
+				(u16 *) &temperature);
+	if (ret)
+		return ret;
+	/* temperature is signed 10 bits value. extend sign */
+	temperature = (temperature << 6) >> 6;
+	*temp = temperature;
+
+	return 0;
+}
+
+static int vd56g3_get_temp_stream_disable(struct vd56g3_dev *sensor, int *temp)
+{
+	int ret;
+
+	/* request temperature read */
+	ret = vd56g3_write_reg(sensor, DEVICE_SW_STBY, CMD_THSENS_READ);
+	if (ret)
+		return ret;
+	ret = vd56g3_poll_reg(sensor, DEVICE_SW_STBY, 0);
+	if (ret)
+		return ret;
+
+	return vd56g3_get_temp_stream_enable(sensor, temp);
+}
+
+static int vd56g3_get_temp(struct vd56g3_dev *sensor, int *temp)
+{
+	*temp = 0;
+	if (sensor->streaming)
+		return vd56g3_get_temp_stream_enable(sensor, temp);
+	else
+		return vd56g3_get_temp_stream_disable(sensor, temp);
+}
+
 static int vd56g3_update_gains(struct vd56g3_dev *sensor, u32 target)
 {
 	struct i2c_client *client = sensor->i2c_client;
@@ -657,10 +734,14 @@ static int vd56g3_stream_enable(struct vd56g3_dev *sensor)
 {
 	int center_x = SENSOR_WIDTH / 2;
 	int center_y = SENSOR_HEIGHT / 2;
+	int is_isl = sensor->current_mode->is_isl;
 	int scale = 1 << sensor->current_mode->bin_mode;
 	int width = sensor->current_mode->width * scale;
 	int height = sensor->current_mode->height * scale;
 	int ret;
+
+	if (is_isl)
+		width -= 2 *scale;
 
 	/* configure output mode */
 	ret = vd56g3_write_reg(sensor, DEVICE_FORMAT_CTRL,
@@ -669,6 +750,12 @@ static int vd56g3_stream_enable(struct vd56g3_dev *sensor)
 		return ret;
 	ret = vd56g3_write_reg(sensor, DEVICE_OIF_IMG_CTRL,
 			       get_datatype_by_code(sensor->fmt.code));
+	if (ret)
+		return ret;
+	ret = vd56g3_write_reg(sensor, DEVICE_OIF_ISL_CTRL, is_isl ?
+			       get_datatype_by_code(sensor->fmt.code) :
+			       0x12);
+	ret = vd56g3_write_reg(sensor, DEVICE_ISL_ENABLE, is_isl);
 	if (ret)
 		return ret;
 
@@ -953,6 +1040,7 @@ static int vd56g3_configure(struct vd56g3_dev *sensor)
 	struct i2c_client *client = sensor->i2c_client;
 	unsigned int prediv;
 	unsigned int mult;
+	unsigned int i;
 	int ret;
 
 	compute_pll_parameters_by_freq(sensor->clk_freq, &prediv, &mult);
@@ -988,6 +1076,12 @@ static int vd56g3_configure(struct vd56g3_dev *sensor)
 	ret = vd56g3_write_reg(sensor, DEVICE_EXP_MODE, EXP_MODE_AUTO);
 	if (ret)
 		return ret;
+	/* gpios in input (disabled) by default */
+	for (i = 0; i < 8; i++) {
+		ret = vd56g3_write_reg(sensor, DEVICE_GPIO_0_CTRL + i, 0x01);
+		if (ret)
+			return ret;
+	}
 
 	sensor->data_rate_in_mbps = (mult * sensor->clk_freq) / prediv;
 	sensor->pclk = (sensor->data_rate_in_mbps * 2) / 10;
@@ -1251,11 +1345,18 @@ static int vd56g3_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct v4l2_subdev *sd = ctrl_to_sd(ctrl);
 	struct vd56g3_dev *sensor = to_vd56g3_dev(sd);
+	int temperature;
 	int ret;
 
 	switch (ctrl->id) {
 	case V4L2_CID_PIXEL_RATE:
 		ret = __v4l2_ctrl_s_ctrl_int64(ctrl, get_pixel_rate(sensor));
+		break;
+	case V4L2_CID_TEMPERATURE:
+		ret = vd56g3_get_temp(sensor, &temperature);
+		if (ret)
+			break;
+		ret = __v4l2_ctrl_s_ctrl(ctrl, temperature);
 		break;
 	default:
 		ret = -EINVAL;
@@ -1301,6 +1402,17 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_3A_LOCK:
 		ret = vd56g3_lock_exposure(sensor, ctrl->val);
 		break;
+	case V4L2_CID_GPIO0_MODE:
+	case V4L2_CID_GPIO1_MODE:
+	case V4L2_CID_GPIO2_MODE:
+	case V4L2_CID_GPIO3_MODE:
+	case V4L2_CID_GPIO4_MODE:
+	case V4L2_CID_GPIO5_MODE:
+	case V4L2_CID_GPIO6_MODE:
+	case V4L2_CID_GPIO7_MODE:
+		ret = vd56g3_update_gpiox_strobe_mode(sensor, ctrl->val,
+			ctrl->id - V4L2_CID_GPIO0_MODE);
+		break;
 	default:
 		ret = -EINVAL;
 		break;
@@ -1312,6 +1424,89 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 static const struct v4l2_ctrl_ops vd56g3_ctrl_ops = {
 	.g_volatile_ctrl = vd56g3_g_volatile_ctrl,
 	.s_ctrl = vd56g3_s_ctrl,
+};
+
+/* FIXME: better add a macro here ? */
+static const struct v4l2_ctrl_config vd56g3_gpio0_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_GPIO0_MODE,
+	.name		= "Gpio0 mode",
+	.type		= V4L2_CTRL_TYPE_MENU,
+	.max		= ARRAY_SIZE(vd56g3_gpios_modes) - 1,
+	.qmenu		= vd56g3_gpios_modes,
+};
+
+static const struct v4l2_ctrl_config vd56g3_gpio1_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_GPIO1_MODE,
+	.name		= "Gpio1 mode",
+	.type		= V4L2_CTRL_TYPE_MENU,
+	.max		= ARRAY_SIZE(vd56g3_gpios_modes) - 1,
+	.qmenu		= vd56g3_gpios_modes,
+};
+
+static const struct v4l2_ctrl_config vd56g3_gpio2_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_GPIO2_MODE,
+	.name		= "Gpio2 mode",
+	.type		= V4L2_CTRL_TYPE_MENU,
+	.max		= ARRAY_SIZE(vd56g3_gpios_modes) - 1,
+	.qmenu		= vd56g3_gpios_modes,
+};
+
+static const struct v4l2_ctrl_config vd56g3_gpio3_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_GPIO3_MODE,
+	.name		= "Gpio3 mode",
+	.type		= V4L2_CTRL_TYPE_MENU,
+	.max		= ARRAY_SIZE(vd56g3_gpios_modes) - 1,
+	.qmenu		= vd56g3_gpios_modes,
+};
+
+static const struct v4l2_ctrl_config vd56g3_gpio4_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_GPIO4_MODE,
+	.name		= "Gpio4 mode",
+	.type		= V4L2_CTRL_TYPE_MENU,
+	.max		= ARRAY_SIZE(vd56g3_gpios_modes) - 1,
+	.qmenu		= vd56g3_gpios_modes,
+};
+
+static const struct v4l2_ctrl_config vd56g3_gpio5_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_GPIO5_MODE,
+	.name		= "Gpio5 mode",
+	.type		= V4L2_CTRL_TYPE_MENU,
+	.max		= ARRAY_SIZE(vd56g3_gpios_modes) - 1,
+	.qmenu		= vd56g3_gpios_modes,
+};
+
+static const struct v4l2_ctrl_config vd56g3_gpio6_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_GPIO6_MODE,
+	.name		= "Gpio6 mode",
+	.type		= V4L2_CTRL_TYPE_MENU,
+	.max		= ARRAY_SIZE(vd56g3_gpios_modes) - 1,
+	.qmenu		= vd56g3_gpios_modes,
+};
+
+static const struct v4l2_ctrl_config vd56g3_gpio7_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_GPIO7_MODE,
+	.name		= "Gpio7 mode",
+	.type		= V4L2_CTRL_TYPE_MENU,
+	.max		= ARRAY_SIZE(vd56g3_gpios_modes) - 1,
+	.qmenu		= vd56g3_gpios_modes,
+};
+
+static const struct v4l2_ctrl_config vd56g3_temp_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_TEMPERATURE,
+	.name		= "Temperature in celsius",
+	.type		= V4L2_CTRL_TYPE_INTEGER,
+	.min		= -1024,
+	.max		= 1023,
+	.step		= 1,
 };
 
 static int vd56g3_init_controls(struct vd56g3_dev *sensor)
@@ -1347,6 +1542,18 @@ static int vd56g3_init_controls(struct vd56g3_dev *sensor)
 	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_EXPOSURE, 1, 500, 1, 10);
 	/* V4L2_CID_3A_LOCK */
 	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_3A_LOCK, 0, 7, 0, 0);
+	/* gpios stuff */
+	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio0_ctrl, NULL);
+	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio1_ctrl, NULL);
+	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio2_ctrl, NULL);
+	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio3_ctrl, NULL);
+	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio4_ctrl, NULL);
+	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio5_ctrl, NULL);
+	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio6_ctrl, NULL);
+	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio7_ctrl, NULL);
+	/* temperature */
+	ctrl = v4l2_ctrl_new_custom(hdl, &vd56g3_temp_ctrl, NULL);
+	ctrl->flags |= V4L2_CTRL_FLAG_VOLATILE | V4L2_CTRL_FLAG_READ_ONLY;
 
 	if (hdl->error) {
 		ret = hdl->error;
