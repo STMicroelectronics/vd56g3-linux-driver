@@ -5,7 +5,7 @@ st-vd56g3-st-dkms (0.3.0) buster; urgency=medium
   * Add formats with isl ouput
   * Add temperature control
 
- -- Mickael Guene <mickael.guene@st.com>  Mon, 25 Nov 2019 07:53:22 +0100
+ -- Mickael Guene <mickael.guene@st.com>  Mon, 25 Nov 2019 07:56:51 +0100
 
 st-vd56g3-st-dkms (0.2.0) buster; urgency=medium
 
