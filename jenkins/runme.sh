@@ -8,7 +8,7 @@ TOP=`pwd`
 WHO=`whoami`
 GID=`id -g ${WHO}`
 SUDO=${SUDO:-sudo}
-DOCKER_ID=${DOCKER_ID:-"docker-registry.st.com/guenem/d410c-base:debian"}
+DOCKER_ID=${DOCKER_ID:-"docker-registry.st.com/img-sw/d410c-base:debian"}
 
 PACKAGE=$(dpkg-parsechangelog --show-field Source)
 RELEASE=$(dpkg-parsechangelog --show-field Distribution)

@@ -1,6 +1,6 @@
 #!groovy​
 
-properties([parameters([string(name: 'DOCKER_ID', defaultValue: "docker-registry.st.com/guenem/d410c-base:debian", description: 'docker image id build environment')]),
+properties([parameters([string(name: 'DOCKER_ID', defaultValue: "docker-registry.st.com/img-sw/d410c-base:debian", description: 'docker image id build environment')]),
             buildDiscarder(logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '', daysToKeepStr: '60', numToKeepStr: '32'))])
 
 node('ubuntu-build-node') {
