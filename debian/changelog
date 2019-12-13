@@ -1,3 +1,9 @@
+st-vd56g3-st-dkms (0.5.0) UNRELEASED; urgency=medium
+
+  * unreleased
+
+ -- Mickael Guene <mickael.guene@st.com>  Fri, 13 Dec 2019 13:10:44 +0100
+
 st-vd56g3-st-dkms (0.4.0) buster; urgency=medium
 
   * Switch to 1.33 patch 
