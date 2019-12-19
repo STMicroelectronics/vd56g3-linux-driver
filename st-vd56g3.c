@@ -741,7 +741,7 @@ static int vd56g3_stream_enable(struct vd56g3_dev *sensor)
 	int ret;
 
 	if (is_isl)
-		width -= 2 *scale;
+		height -= 2 *scale;
 
 	/* configure output mode */
 	ret = vd56g3_write_reg(sensor, DEVICE_FORMAT_CTRL,
