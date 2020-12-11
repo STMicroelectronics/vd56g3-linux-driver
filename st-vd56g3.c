@@ -26,6 +26,7 @@
 
 #define DEVICE_MODEL_ID_REG				0x0000
 #define VD56G3_MODEL_ID					0x5603
+#define DEVICE_REVISION					0x0002
 #define DEVICE_FWPATCH_REVISION				0x001e
 #define DEVICE_SYSTEM_FSM				0x0028
 #define SENSOR_READY_TO_BOOT				0x01
@@ -76,7 +77,9 @@
 #define DEVICE_GPIO_5_CTRL				0x046c
 #define DEVICE_GPIO_6_CTRL				0x046d
 #define DEVICE_GPIO_7_CTRL				0x046e
-#define DEVICE_READOUT_CTRL				0x048e
+//TODO : Clean Me
+#define DEVICE_READOUT_CTRL_CUT1			0x048e
+#define DEVICE_READOUT_CTRL_CUT2			0x047e
 
 #define SENSOR_WIDTH					1124
 #define SENSOR_HEIGHT					1364
@@ -92,7 +95,8 @@
 
 #define V4L2_CID_TEMPERATURE			(V4L2_CID_USER_BASE | 0x1020)
 
-#include "st-vd56g3_patch.c"
+#include "st-vd56g3_patch_cut1.c"
+#include "st-vd56g3_patch_cut2.c"
 
 static const char * const vd56g3_test_pattern_menu[] = {
 	"Disabled", "Solid", "Colorbar", "Gradbar",
@@ -187,6 +191,8 @@ struct vd56g3_dev {
 	bool vflip;
 	int manual_expo_ms;
 	enum vd56g3_expo_state expo_state;
+	/* TODO: remove later */
+	bool is_cut2;
 };
 
 /* helpers */
@@ -667,6 +673,7 @@ static int vd56g3_detect(struct vd56g3_dev *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
 	u16 id = 0;
+	u16 device_revision;
 	int ret;
 
 	ret = vd56g3_wait_state(sensor, SENSOR_READY_TO_BOOT);
@@ -679,6 +686,19 @@ static int vd56g3_detect(struct vd56g3_dev *sensor)
 
 	if (id != VD56G3_MODEL_ID) {
 		dev_warn(&client->dev, "Unsupported sensor id %x", id);
+		return -ENODEV;
+	}
+
+	ret = vd56g3_read_reg16(sensor, DEVICE_REVISION, &device_revision);
+	if (ret)
+		return ret;
+
+	if ((device_revision >> 8) == 0x20) {
+		sensor->is_cut2 = true;
+	} else if ((device_revision >> 8) == 0x10) {
+		sensor->is_cut2 = false;
+	} else {
+		dev_warn(&client->dev, "Unsupported Cut version %x", device_revision);
 		return -ENODEV;
 	}
 
@@ -760,8 +780,13 @@ static int vd56g3_stream_enable(struct vd56g3_dev *sensor)
 		return ret;
 
 	/* configure size and bin mode */
-	ret = vd56g3_write_reg(sensor, DEVICE_READOUT_CTRL,
-			       sensor->current_mode->bin_mode);
+	if (sensor->is_cut2) {
+		ret = vd56g3_write_reg(sensor, DEVICE_READOUT_CTRL_CUT2,
+				sensor->current_mode->bin_mode);
+	} else {
+		ret = vd56g3_write_reg(sensor, DEVICE_READOUT_CTRL_CUT1,
+				sensor->current_mode->bin_mode);
+	}
 	if (ret)
 		return ret;
 	ret = vd56g3_write_reg16(sensor, DEVICE_ROI_X_START,
@@ -980,11 +1005,24 @@ error_alloc:
 static int vd56g3_patch(struct vd56g3_dev *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
-	u16 patch;
+	const u8 *patch;
+	int patch_size;
+	u8 patch_major;
+	u8 patch_minor;
+	u16 cur_patch_rev;
 	int ret;
 
-	ret = vd56g3_write_array(sensor, 0x2000, sizeof(array_0x2000),
-				 array_0x2000);
+	if (sensor->is_cut2) {
+		patch = patch_cut2;
+		patch_size = sizeof(patch_cut2);
+	} else {
+		patch = patch_cut1;
+		patch_size = sizeof(patch_cut1);
+	}
+	patch_major = patch[3];
+	patch_minor = patch[2];
+
+	ret = vd56g3_write_array(sensor, 0x2000, patch_size, patch);
 	if (ret)
 		return ret;
 
@@ -996,19 +1034,17 @@ static int vd56g3_patch(struct vd56g3_dev *sensor)
 	if (ret)
 		return ret;
 
-	ret = vd56g3_read_reg16(sensor, DEVICE_FWPATCH_REVISION, &patch);
+	ret = vd56g3_read_reg16(sensor, DEVICE_FWPATCH_REVISION, &cur_patch_rev);
 	if (ret)
 		return ret;
 
-	if (patch != (DEVICE_FWPATCH_REVISION_MAJOR << 8) +
-	    DEVICE_FWPATCH_REVISION_MINOR) {
+	if (cur_patch_rev != (patch_major << 8) + patch_minor) {
 		dev_err(&client->dev, "bad patch version expected %d.%d got %d.%d",
-			DEVICE_FWPATCH_REVISION_MAJOR,
-			DEVICE_FWPATCH_REVISION_MINOR,
-			patch >> 8, patch & 0xff);
+			patch_major, patch_minor,
+			cur_patch_rev >> 8, cur_patch_rev & 0xff);
 		return -ENODEV;
 	}
-	dev_info(&client->dev, "patch %d.%d applied", patch >> 8, patch & 0xff);
+	dev_info(&client->dev, "patch %d.%d applied", cur_patch_rev >> 8, cur_patch_rev & 0xff);
 
 	return 0;
 }
