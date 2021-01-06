@@ -1,0 +1,20 @@
+@import url("theme.css");
+
+@media screen {
+
+    /* content column
+     *
+     * RTD theme's default is 800px, having the full width is preferred here.
+     */
+
+    .wy-nav-content{ max-width: none; }
+
+}
+
+/* Custom style for reqtracer tags */
+.reqtracer {
+    font-variant: small-caps;
+    color: grey;
+    font-weight: bold;
+    font-size: 80%;
+}

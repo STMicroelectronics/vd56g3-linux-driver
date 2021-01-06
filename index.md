@@ -1,0 +1,38 @@
+VD56G3 (aka Fox) Driver
+=======================
+
+This repository contains a V4L2 linux driver for the vd56g3 (aka Fox) sensor.
+
+Repository Organization
+-----------------------
+
+- `src` folder contains source code + Makefile
+- `doc` folder contains a sphinx-based documentation 
+
+Branching Model
+---------------
+
+The proposed Branching Model is a simplified version of [GitFlow](https://datasift.github.io/gitflow/IntroducingGitFlow.html)
+
+```
+                   0.1         0.2                     0.X
+                    |           |                       |
+    *---------------*-----------*-----------------------* master
+     \             /           /                       /
+      *---*---*---*---*---*---*---*---*---*---*---*---* develop
+           \         /                 \         /
+            *---*---* feature-x         *---*---* feature-y
+
+```
+
+1. `master` and `develop`: the two main branches
+
+    - `master`: the main branch, with "production-ready" content (hold the different release TAGS)
+    - `develop`: contains the latest delivered development change (should be relatively stable)
+
+2. `feature-x` branches
+
+    - Branch off from `develop` and merge back to `develop`
+    - Interesting when multiple developpers are contributing on different feature at the same time
+    - Used to develop new features requiring significant amount of work (i.e. multiple commits)
+    - Depending of the nature of the feature branch, someone may want to keep the historical existence of the branch (use of `--no-ff` argument while merging) or not (default merge behavior).

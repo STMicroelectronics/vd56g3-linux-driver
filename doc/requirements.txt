@@ -1,0 +1,10 @@
+
+# Requirement for sphinx generation
+
+# Temporary fix sphinx <2 waiting for full compatibility of rtd_theme. See : https://github.com/readthedocs/sphinx_rtd_theme/projects/1
+sphinx<2
+sphinx_rtd_theme
+
+# Enable 3rd party sphinx extensions
+git+http://github.com/return42/linuxdoc.git
+
