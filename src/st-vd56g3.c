@@ -28,6 +28,9 @@
 #define VD56G3_MODEL_ID					0x5603
 #define DEVICE_REVISION					0x0002
 #define DEVICE_FWPATCH_REVISION				0x001e
+#define DEVICE_VTIMING_RD_REVISION			0x0020
+#define DEVICE_VTIMING_GR_REVISION			0x0024
+#define DEVICE_VTIMING_GT_REVISION			0x0026
 #define DEVICE_SYSTEM_FSM				0x0028
 #define SENSOR_READY_TO_BOOT				0x01
 #define SENSOR_SW_STBY					0x02
@@ -41,6 +44,9 @@
 #define CMD_THSENS_READ					4
 #define DEVICE_STREAMING				0x0202
 #define CMD_STOP_STREAM					1
+#define DEVICE_DEBUG					0x0203
+#define CMD_START_VTRAM_UPDATE				1
+#define CMD_END_VTRAM_UPDATE				2
 #define DEVICE_EXT_CLOCK				0x0220
 #define DEVICE_CLK_PLL_PREDIV				0x0224
 #define DEVICE_CLK_SYS_PLL_MULT				0x0226
@@ -80,6 +86,8 @@
 //TODO : Clean Me
 #define DEVICE_READOUT_CTRL_CUT1			0x048e
 #define DEVICE_READOUT_CTRL_CUT2			0x047e
+#define MINIMUM_EXPOSURE_10BIT				0x096c
+#define OVERRIDE_VT_REGISTERS				0x0973
 
 #define SENSOR_WIDTH					1124
 #define SENSOR_HEIGHT					1364
@@ -97,6 +105,7 @@
 
 #include "st-vd56g3_patch_cut1.c"
 #include "st-vd56g3_patch_cut2.c"
+#include "st-vd56g3_vtpatch.c"
 
 static const char * const vd56g3_test_pattern_menu[] = {
 	"Disabled", "Solid", "Colorbar", "Gradbar",
@@ -1071,6 +1080,92 @@ static int vd56g3_boot(struct vd56g3_dev *sensor)
 	return 0;
 }
 
+static int vd56g3_vtpatch(struct vd56g3_dev *sensor)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	int i;
+	int vtpatch_offset = 0;
+	u8 cur_vtpatch_rd_rev, cur_vtpatch_gr_rev, cur_vtpatch_gt_rev;
+	int ret;
+
+	if (sensor->is_cut2) {
+		// VT Patch support only in Cut2.0
+		ret = vd56g3_write_reg(sensor, DEVICE_DEBUG, CMD_START_VTRAM_UPDATE);
+		if (ret)
+			return ret;
+
+		ret = vd56g3_poll_reg(sensor, DEVICE_DEBUG, 0);
+		if (ret)
+			return ret;
+
+		ret = vd56g3_wait_state(sensor, SENSOR_SW_STBY);
+		if (ret)
+			return ret;
+
+		for (i = 0; i < vtpatch_area_nb; i++)
+		{
+			ret = vd56g3_write_array(sensor, vtpatch_desc[i].offset, vtpatch_desc[i].size, vtpatch + vtpatch_offset);
+			if (ret)
+				return ret;
+
+			vtpatch_offset += vtpatch_desc[i].size;
+		}
+
+		// TODO replace with correct register names
+		ret = vd56g3_write_reg(sensor, 0xd9f8, VT_REVISION);
+		if (ret)
+			return ret;
+		ret = vd56g3_write_reg(sensor, 0xaffc, VT_REVISION);
+		if (ret)
+			return ret;
+		ret = vd56g3_write_reg(sensor, 0xbbb4, VT_REVISION);
+		if (ret)
+			return ret;
+		ret = vd56g3_write_reg(sensor, 0xb898, VT_REVISION);
+		if (ret)
+			return ret;
+
+		ret = vd56g3_write_reg(sensor, OVERRIDE_VT_REGISTERS, 1);
+		if (ret)
+			return ret;
+		ret = vd56g3_write_reg16(sensor, MINIMUM_EXPOSURE_10BIT, MINIMUM_EXPOSURE);
+		if (ret)
+			return ret;
+
+		ret = vd56g3_write_reg(sensor, DEVICE_DEBUG, CMD_END_VTRAM_UPDATE);
+		if (ret)
+			return ret;
+
+		ret = vd56g3_poll_reg(sensor, DEVICE_DEBUG, 0);
+		if (ret)
+			return ret;
+
+		ret = vd56g3_wait_state(sensor, SENSOR_SW_STBY);
+		if (ret)
+			return ret;
+
+		ret = vd56g3_read_reg(sensor, DEVICE_VTIMING_RD_REVISION, &cur_vtpatch_rd_rev);
+		if (ret)
+			return ret;
+		ret = vd56g3_read_reg(sensor, DEVICE_VTIMING_GR_REVISION, &cur_vtpatch_gr_rev);
+		if (ret)
+			return ret;
+		ret = vd56g3_read_reg(sensor, DEVICE_VTIMING_GT_REVISION, &cur_vtpatch_gt_rev);
+		if (ret)
+			return ret;
+
+		if (cur_vtpatch_rd_rev != VT_REVISION || cur_vtpatch_gr_rev != VT_REVISION ||
+		    cur_vtpatch_gt_rev != VT_REVISION ) {
+			dev_err(&client->dev, "bad vtpatch version, expected %d got rd:%d, gr:%d gt:%d",
+				VT_REVISION, cur_vtpatch_rd_rev, cur_vtpatch_gr_rev, cur_vtpatch_gt_rev);
+			return -ENODEV;
+		}
+		dev_info(&client->dev, "VT patch %d applied", VT_REVISION);
+	}
+
+	return 0;
+}
+
 static int vd56g3_configure(struct vd56g3_dev *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
@@ -1733,6 +1828,12 @@ static int vd56g3_probe(struct i2c_client *client)
 	ret = vd56g3_boot(sensor);
 	if (ret) {
 		dev_err(&client->dev, "sensor boot failed %d", ret);
+		goto disable_clock;
+	}
+
+	ret = vd56g3_vtpatch(sensor);
+	if (ret) {
+		dev_err(&client->dev, "sensor VT patch failed %d", ret);
 		goto disable_clock;
 	}
 
