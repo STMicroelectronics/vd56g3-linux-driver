@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Driver for vgxy61 sensor families
+ * Driver for VD56G3 global shutter sensor
  *
- * Copyright (C) STMicroelectronics SA 2020
- * Authors: Meycene Toumi <meycene.toumi@st.com>
+ * Copyright (C) STMicroelectronics SA 2021
+ * Authors: Sylvain Petinot <sylvain.petinot@st.com>
  *          for STMicroelectronics.
- *
  *
  */
 
