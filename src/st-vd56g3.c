@@ -86,8 +86,6 @@
 //TODO : Clean Me
 #define DEVICE_READOUT_CTRL_CUT1			0x048e
 #define DEVICE_READOUT_CTRL_CUT2			0x047e
-#define MINIMUM_EXPOSURE_10BIT				0x096c
-#define OVERRIDE_VT_REGISTERS				0x0973
 
 #define SENSOR_WIDTH					1124
 #define SENSOR_HEIGHT					1364
@@ -1122,13 +1120,6 @@ static int vd56g3_vtpatch(struct vd56g3_dev *sensor)
 		if (ret)
 			return ret;
 		ret = vd56g3_write_reg(sensor, 0xb898, VT_REVISION);
-		if (ret)
-			return ret;
-
-		ret = vd56g3_write_reg(sensor, OVERRIDE_VT_REGISTERS, 1);
-		if (ret)
-			return ret;
-		ret = vd56g3_write_reg16(sensor, MINIMUM_EXPOSURE_10BIT, MINIMUM_EXPOSURE);
 		if (ret)
 			return ret;
 
