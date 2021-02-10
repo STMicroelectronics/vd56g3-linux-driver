@@ -83,6 +83,7 @@
 #define DEVICE_GPIO_5_CTRL				0x046c
 #define DEVICE_GPIO_6_CTRL				0x046d
 #define DEVICE_GPIO_7_CTRL				0x046e
+#define DEVICE_EXP_COARSE_INTG_MARGIN			0x0946
 //TODO : Clean Me
 #define DEVICE_READOUT_CTRL_CUT1			0x048e
 #define DEVICE_READOUT_CTRL_CUT2			0x047e
@@ -1201,6 +1202,13 @@ static int vd56g3_configure(struct vd56g3_dev *sensor)
 	/* gpios in input (disabled) by default */
 	for (i = 0; i < 8; i++) {
 		ret = vd56g3_write_reg(sensor, DEVICE_GPIO_0_CTRL + i, 0x01);
+		if (ret)
+			return ret;
+	}
+
+	if (sensor->is_cut2) {
+		/* Increment EXP_COARSE_INTG_MARGIN to ensure proper behavior with OF */
+		ret = vd56g3_write_reg16(sensor, DEVICE_EXP_COARSE_INTG_MARGIN,	68);
 		if (ret)
 			return ret;
 	}
