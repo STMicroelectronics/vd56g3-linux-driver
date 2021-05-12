@@ -43,4 +43,4 @@ PDF version
     :glob:
     :hidden:
     
-    vd56g3_on_rpi
+    vd56g3

@@ -22,7 +22,7 @@ copyright = '2021, ST Microelectronics'
 author = 'SP'
 
 # The full version, including alpha/beta/rc tags
-release = '0.1.2'
+release = '0.1.0'
 
 
 # -- General configuration ---------------------------------------------------
@@ -89,10 +89,11 @@ latex_elements = {
 \SetWatermarkFontSize{1.5cm}
 \SetWatermarkColor[rgb]{1,0.7,0.7}
     ''',
+    'figure_align': 'H',
 }
 
 # List of tuples (startdocname, targetname, title, author, theme, toctree_only)
-latex_documents = [('vd56g3_on_rpi','vd56g3_on_rpi.tex','VD56G3 on RPI','','manual')]
+latex_documents = [('vd56g3','vd56g3.tex','VD56G3 Linux Driver Documentation','','manual')]
 
 latex_logo = '_sphinx_static/logo.png'
 

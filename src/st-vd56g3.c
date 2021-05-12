@@ -91,6 +91,7 @@
 #define SENSOR_WIDTH					1124
 #define SENSOR_HEIGHT					1364
 
+/* parse-SNIP: Custom-CIDs*/
 #define V4L2_CID_GPIO0_MODE			(V4L2_CID_USER_BASE | 0x1010)
 #define V4L2_CID_GPIO1_MODE			(V4L2_CID_USER_BASE | 0x1011)
 #define V4L2_CID_GPIO2_MODE			(V4L2_CID_USER_BASE | 0x1012)
@@ -101,6 +102,7 @@
 #define V4L2_CID_GPIO7_MODE			(V4L2_CID_USER_BASE | 0x1017)
 
 #define V4L2_CID_TEMPERATURE			(V4L2_CID_USER_BASE | 0x1020)
+/* parse-SNAP: */
 
 #include "st-vd56g3_patch_cut1.c"
 #include "st-vd56g3_patch_cut2.c"
@@ -155,6 +157,30 @@ static const u32 vd56g3_supported_codes[] = {
 	MEDIA_BUS_FMT_SGBRG8_1X8,
 	MEDIA_BUS_FMT_SGBRG10_1X10
 };
+
+/**
+ * DOC: Supported Modes
+ *
+ * The vd56g3 driver supports 8 modes described in the next table :
+ *
+ * ======= ======== ============
+ *  Width   Height   Binning
+ * ======= ======== ============
+ *   1124     1364   No Binning
+ *   1024     1280   No Binning
+ *   1024     1024   No Binning
+ *    720     1280   No Binning
+ *    640      480   No Binning
+ *    480      640   Binning x2
+ *    320      240   Binning x2
+ *    240      320   Binning x4
+ * ======= ======== ============
+ *
+ * For each mode, 9 framerates are supported : 90, 60, 50, 30, 25, 15, 10, 5 and 1 FPS.
+ *
+ * The selection of the desired resolution / framerate is done through standard V4L2 API.
+ * VD56G3 driver implements common camera-type operations (see below the list of supported V4L2 operations).
+ */
 
 const int vd56g3_sensor_frame_rates[] = { 90, 60, 50, 30, 25, 15, 10, 5, 1 };
 
@@ -1223,7 +1249,37 @@ static int vd56g3_configure(struct vd56g3_dev *sensor)
 	return 0;
 }
 
-/* implement v4l2_subdev_video_ops */
+/**
+ * DOC: V4L2 exposed Operations
+ *
+ * **This sections contains all vd56g3 operations exposed through standard V4L2 API**
+ *
+ * See below the supported callbacks (categorized following V4L2 classification):
+ *
+ * - ``v4l2_subdev_core_ops``. **core ops** callbacks for subdev
+ *
+ *      + no callback defined here
+ *
+ * - ``v4l2_subdev_video_ops``: **video-related** callbacks
+ *
+ *      + vd56g3_s_stream(). V4L2 notification that a video stream will start or has stopped.
+ *      + vd56g3_g_frame_interval(). Callback to get the frame interval (period, in seconds, between consecutive video frames)
+ *      + vd56g3_s_frame_interval(). Callback to set the frame interval (period, in seconds, between consecutive video frames)
+ *
+ * - ``v4l2_subdev_pad_ops``: **pad-level** callbacks
+ *
+ *      + vd56g3_enum_mbus_code(). Callback to enumerate available media bus formats
+ *      + vd56g3_get_fmt() - Callback to get the frame format of specific subdev pads
+ *      + vd56g3_set_fmt() - Callback to set a given frame format
+ *      + vd56g3_enum_frame_size(). Callback to enumerate supported frame sizes
+ *      + vd56g3_enum_frame_interval(). Callback to enumerate available frame intervals
+ */
+
+/**
+ * vd56g3_s_stream - Callback notifying the streaming start
+ * @sd: v4l2 subdevice entry point
+ * @enable: enable or disable stream
+ */
 static int vd56g3_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	struct vd56g3_dev *sensor = to_vd56g3_dev(sd);
@@ -1249,6 +1305,14 @@ out:
 	return ret;
 }
 
+/**
+ * vd56g3_g_frame_interval - Callback to get the frame interval
+ * @sd: v4l2 subdevice entry point
+ * @fi: the frame_interval to retrieve
+ *
+ * This callback enables to retrieve the current frame interval.
+ * It will be triggered upon the VIDIOC_SUBDEV_G_FRAME_INTERVAL() ioctl call.
+ */
 static int vd56g3_g_frame_interval(struct v4l2_subdev *sd,
 				   struct v4l2_subdev_frame_interval *fi)
 {
@@ -1261,6 +1325,14 @@ static int vd56g3_g_frame_interval(struct v4l2_subdev *sd,
 	return 0;
 }
 
+/**
+ * vd56g3_s_frame_interval - Callback to set the frame interval
+ * @sd: v4l2 subdevice entry point
+ * @fi: the frame interval to set
+ *
+ * This callback enables to change the frame interval with the given @fi value.
+ * It will be triggered upon the VIDIOC_SUBDEV_S_FRAME_INTERVAL() ioctl call.
+ */
 static int vd56g3_s_frame_interval(struct v4l2_subdev *sd,
 				   struct v4l2_subdev_frame_interval *fi)
 {
@@ -1309,7 +1381,15 @@ out:
 	return ret;
 }
 
-/* implement v4l2_subdev_pad_ops */
+/**
+ * vd56g3_enum_mbus_code - Callback to enumerate available media bus formats
+ * @sd: v4l2 subdevice entry point
+ * @cfg: struct used for storing subdev pad information
+ * @code: pointer to struct v4l2_subdev_mbus_code_enum that the driver will fill with the available mbus format
+ *
+ * This callback enables to enumerate media bus formats available at a given sub-device pad.
+ * It will be triggered upon the VIDIOC_SUBDEV_ENUM_MBUS_CODE() ioctl call.
+ */
 static int vd56g3_enum_mbus_code(struct v4l2_subdev *sd,
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 				 struct v4l2_subdev_pad_config *cfg,
@@ -1330,6 +1410,15 @@ static int vd56g3_enum_mbus_code(struct v4l2_subdev *sd,
 	return 0;
 }
 
+/**
+ * vd56g3_get_fmt - Callback to get the frame format of specific subdev pads
+ * @sd: v4l2 subdevice entry point
+ * @cfg: struct used for storing subdev pad information
+ * @format: the v4l2_subdev_format struct for which format field will be filled by the driver
+ *
+ * This callback enables to retrieve the frame format.
+ * It will be triggered upon the VIDIOC_SUBDEV_G_FMT() ioctl call.
+ */
 static int vd56g3_get_fmt(struct v4l2_subdev *sd,
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 			  struct v4l2_subdev_pad_config *cfg,
@@ -1365,6 +1454,15 @@ static int vd56g3_get_fmt(struct v4l2_subdev *sd,
 	return 0;
 }
 
+/**
+ * vd56g3_set_fmt - Callback to set a given frame format
+ * @sd: v4l2 subdevice entry point
+ * @cfg: struct used for storing subdev pad information
+ * @format: the format to set
+ *
+ * This callback enables to change the format with the given @format value.
+ * It will be triggered upon the VIDIOC_SUBDEV_S_FMT() ioctl call.
+ */
 static int vd56g3_set_fmt(struct v4l2_subdev *sd,
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 			  struct v4l2_subdev_pad_config *cfg,
@@ -1415,6 +1513,16 @@ out:
 	return ret;
 }
 
+/**
+ * vd56g3_enum_frame_size - Callback to enumerate supported frame sizes
+ * @sd: v4l2 subdevice entry point
+ * @cfg: struct used for storing subdev pad information
+ * @fse: pointer to struct v4l2_subdev_frame_size_enum that the driver will fill with the supported frame size
+ *
+ * This callback enables to enumerate all frame sizes supported by a sub-device
+ * on the given pad for the given media bus format.
+ * It will be triggered upon the VIDIOC_SUBDEV_ENUM_FRAME_SIZE() ioctl call.
+ */
 static int vd56g3_enum_frame_size(struct v4l2_subdev *sd,
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 				  struct v4l2_subdev_pad_config *cfg,
@@ -1440,6 +1548,15 @@ static int vd56g3_enum_frame_size(struct v4l2_subdev *sd,
 	return 0;
 }
 
+/**
+ * vd56g3_enum_frame_interval - Callback to enumerate available frame intervals on a given sub-device pad
+ * @sd: v4l2 subdevice entry point
+ * @cfg: struct used for storing subdev pad information
+ * @fie: pointer to struct v4l2_subdev_frame_interval_enum that the driver will fill with the supported frame intervals
+ *
+ * This callback enables to enumerate available frame intervals on a given sub-device pad.
+ * It will be triggered upon the VIDIOC_SUBDEV_ENUM_FRAME_INTERVAL() ioctl call
+ */
 static int vd56g3_enum_frame_interval(struct v4l2_subdev *sd,
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 				      struct v4l2_subdev_pad_config *cfg,
@@ -1498,7 +1615,46 @@ static const struct media_entity_operations vd56g3_subdev_entity_ops = {
 	.link_validate = v4l2_subdev_link_validate,
 };
 
-/* controls */
+/**
+ * DOC: V4L2 supported Controls
+ *
+ * The vd56g3 driver implements the following list of standard V4L2 controls.
+ *
+ * ============================ ================================================
+ *  Standard V4L2 Control        Description
+ * ============================ ================================================
+ *  ``V4L2_CID_PIXEL_RATE``      Pixel rate (mandatory for a `CSI transmitter`_)
+ *  ``V4L2_CID_LINK_FREQ``       Link frequency (mandatory for a `CSI transmitter`_)
+ *  ``V4L2_CID_VFLIP``           Vertical flip (see `V4L2 User Controls`_)
+ *  ``V4L2_CID_HFLIP``           Horizontal flip (see `V4L2 User Controls`_)
+ *  ``V4L2_CID_TEST_PATTERN``    Test pattern generation (see `V4L2 Image Process Controls`_)
+ *  ``V4L2_CID_EXPOSURE_AUTO``   Auto Exposure (see `V4L2 Camera Controls`_)
+ *  ``V4L2_CID_3A_LOCK``         Lock/Unlock auto expo (see `V4L2 Camera Controls`_)
+ *  ``V4L2_CID_GAIN``            Gain setting when auto expo is disabled (see `V4L2 User Controls`_)
+ *  ``V4L2_CID_EXPOSURE``        Exposure setting when auto expo is disabled (see `V4L2 User Controls`_)
+ * ============================ ================================================
+ *
+ * In addition to standard V4L2 control, the vd56g3 driver also defines specific custom controls.
+ *
+ * ============================ ================================================
+ *  Custom V4L2 Control          Description
+ * ============================ ================================================
+ *  ``V4L2_CID_GPIO0_MODE``	 `GPIO0 mode selection Control`_
+ *  ``V4L2_CID_GPIO1_MODE``      `GPIO1 mode selection Control`_
+ *  ``V4L2_CID_GPIO2_MODE``      `GPIO2 mode selection Control`_
+ *  ``V4L2_CID_GPIO3_MODE``      `GPIO3 mode selection Control`_
+ *  ``V4L2_CID_GPIO4_MODE``      `GPIO4 mode selection Control`_
+ *  ``V4L2_CID_GPIO5_MODE``      `GPIO5 mode selection Control`_
+ *  ``V4L2_CID_GPIO6_MODE``      `GPIO6 mode selection Control`_
+ *  ``V4L2_CID_GPIO7_MODE``      `GPIO7 mode selection Control`_
+ *  ``V4L2_CID_TEMPERATURE``     `Temperature Control`_
+ * ============================ ================================================
+ *
+ * .. _CSI transmitter: https://www.kernel.org/doc/html/latest/driver-api/media/csi2.html
+ * .. _V4L2 User Controls: https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/control.html?#control-ids
+ * .. _V4L2 Image Process Controls: https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/ext-ctrls-image-process.html?#image-process-control-ids
+ * .. _V4L2 Camera Controls: https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/ext-ctrls-camera.html?#camera-control-ids
+ */
 static int vd56g3_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct v4l2_subdev *sd = ctrl_to_sd(ctrl);
@@ -1585,6 +1741,16 @@ static const struct v4l2_ctrl_ops vd56g3_ctrl_ops = {
 };
 
 /* FIXME: better add a macro here ? */
+
+/**
+ * DOC: GPIO0 mode selection Control
+ *
+ * :id:     ``V4L2_CID_GPIO0_MODE``
+ * :type:   ``V4L2_CTRL_TYPE_MENU``
+ * :qmenu:  "disabled", "strobe envelope positive", "strobe envelope negative"
+ * :def:    "disabled"
+ *
+ */
 static const struct v4l2_ctrl_config vd56g3_gpio0_ctrl = {
 	.ops		= &vd56g3_ctrl_ops,
 	.id		= V4L2_CID_GPIO0_MODE,
@@ -1594,6 +1760,15 @@ static const struct v4l2_ctrl_config vd56g3_gpio0_ctrl = {
 	.qmenu		= vd56g3_gpios_modes,
 };
 
+/**
+ * DOC: GPIO1 mode selection Control
+ *
+ * :id:     ``V4L2_CID_GPIO1_MODE``
+ * :type:   ``V4L2_CTRL_TYPE_MENU``
+ * :qmenu:  "disabled", "strobe envelope positive", "strobe envelope negative"
+ * :def:    "disabled"
+ *
+ */
 static const struct v4l2_ctrl_config vd56g3_gpio1_ctrl = {
 	.ops		= &vd56g3_ctrl_ops,
 	.id		= V4L2_CID_GPIO1_MODE,
@@ -1603,6 +1778,15 @@ static const struct v4l2_ctrl_config vd56g3_gpio1_ctrl = {
 	.qmenu		= vd56g3_gpios_modes,
 };
 
+/**
+ * DOC: GPIO2 mode selection Control
+ *
+ * :id:     ``V4L2_CID_GPIO2_MODE``
+ * :type:   ``V4L2_CTRL_TYPE_MENU``
+ * :qmenu:  "disabled", "strobe envelope positive", "strobe envelope negative"
+ * :def:    "disabled"
+ *
+ */
 static const struct v4l2_ctrl_config vd56g3_gpio2_ctrl = {
 	.ops		= &vd56g3_ctrl_ops,
 	.id		= V4L2_CID_GPIO2_MODE,
@@ -1612,6 +1796,15 @@ static const struct v4l2_ctrl_config vd56g3_gpio2_ctrl = {
 	.qmenu		= vd56g3_gpios_modes,
 };
 
+/**
+ * DOC: GPIO3 mode selection Control
+ *
+ * :id:     ``V4L2_CID_GPIO3_MODE``
+ * :type:   ``V4L2_CTRL_TYPE_MENU``
+ * :qmenu:  "disabled", "strobe envelope positive", "strobe envelope negative"
+ * :def:    "disabled"
+ *
+ */
 static const struct v4l2_ctrl_config vd56g3_gpio3_ctrl = {
 	.ops		= &vd56g3_ctrl_ops,
 	.id		= V4L2_CID_GPIO3_MODE,
@@ -1621,6 +1814,15 @@ static const struct v4l2_ctrl_config vd56g3_gpio3_ctrl = {
 	.qmenu		= vd56g3_gpios_modes,
 };
 
+/**
+ * DOC: GPIO4 mode selection Control
+ *
+ * :id:     ``V4L2_CID_GPIO4_MODE``
+ * :type:   ``V4L2_CTRL_TYPE_MENU``
+ * :qmenu:  "disabled", "strobe envelope positive", "strobe envelope negative"
+ * :def:    "disabled"
+ *
+ */
 static const struct v4l2_ctrl_config vd56g3_gpio4_ctrl = {
 	.ops		= &vd56g3_ctrl_ops,
 	.id		= V4L2_CID_GPIO4_MODE,
@@ -1630,6 +1832,15 @@ static const struct v4l2_ctrl_config vd56g3_gpio4_ctrl = {
 	.qmenu		= vd56g3_gpios_modes,
 };
 
+/**
+ * DOC: GPIO5 mode selection Control
+ *
+ * :id:     ``V4L2_CID_GPIO5_MODE``
+ * :type:   ``V4L2_CTRL_TYPE_MENU``
+ * :qmenu:  "disabled", "strobe envelope positive", "strobe envelope negative"
+ * :def:    "disabled"
+ *
+ */
 static const struct v4l2_ctrl_config vd56g3_gpio5_ctrl = {
 	.ops		= &vd56g3_ctrl_ops,
 	.id		= V4L2_CID_GPIO5_MODE,
@@ -1639,6 +1850,15 @@ static const struct v4l2_ctrl_config vd56g3_gpio5_ctrl = {
 	.qmenu		= vd56g3_gpios_modes,
 };
 
+/**
+ * DOC: GPIO6 mode selection Control
+ *
+ * :id:     ``V4L2_CID_GPIO6_MODE``
+ * :type:   ``V4L2_CTRL_TYPE_MENU``
+ * :qmenu:  "disabled", "strobe envelope positive", "strobe envelope negative"
+ * :def:    "disabled"
+ *
+ */
 static const struct v4l2_ctrl_config vd56g3_gpio6_ctrl = {
 	.ops		= &vd56g3_ctrl_ops,
 	.id		= V4L2_CID_GPIO6_MODE,
@@ -1648,6 +1868,15 @@ static const struct v4l2_ctrl_config vd56g3_gpio6_ctrl = {
 	.qmenu		= vd56g3_gpios_modes,
 };
 
+/**
+ * DOC: GPIO7 mode selection Control
+ *
+ * :id:     ``V4L2_CID_GPIO7_MODE``
+ * :type:   ``V4L2_CTRL_TYPE_MENU``
+ * :qmenu:  "disabled", "strobe envelope positive", "strobe envelope negative"
+ * :def:    "disabled"
+ *
+ */
 static const struct v4l2_ctrl_config vd56g3_gpio7_ctrl = {
 	.ops		= &vd56g3_ctrl_ops,
 	.id		= V4L2_CID_GPIO7_MODE,
@@ -1657,6 +1886,14 @@ static const struct v4l2_ctrl_config vd56g3_gpio7_ctrl = {
 	.qmenu		= vd56g3_gpios_modes,
 };
 
+/**
+ * DOC: Temperature Control
+ *
+ * Return sensor temperature (in Celsius)
+ *
+ * :id:     ``V4L2_CID_TEMPERATURE``
+ * :type:   ``V4L2_CTRL_TYPE_INTEGER``
+ */
 static const struct v4l2_ctrl_config vd56g3_temp_ctrl = {
 	.ops		= &vd56g3_ctrl_ops,
 	.id		= V4L2_CID_TEMPERATURE,
