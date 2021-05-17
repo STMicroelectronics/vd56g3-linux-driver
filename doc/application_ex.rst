@@ -5,7 +5,7 @@ Application examples
 .. Note :: 
     From userspace perspective, the VD56G3 driver offer a sub-device node (``/dev/v4l-subdevXXX``) which can be used to configure and control the sensor.
 
-The sensor can be controlled through `Mainstream V4L2 applications`_ or custom application (especially when the sensor provides specific features).
+The sensor can be controlled through `Mainstream V4L2 applications`_ or `Custom applications`_ (especially when the sensor provides specific features).
 
 Mainstream V4L2 applications
 ============================
@@ -99,3 +99,66 @@ There are as many ways to make the sensor stream as there are V4L2 applications;
 
         # Capture 5 frames and save them in "file.raw"
         v4l2-ctl --device /dev/video0 --stream-mmap --stream-count=5 --stream-to=file.raw
+
+
+Custom applications
+===================
+
+The `V4L2 API`_ is available from userspace. It's possible to develop custom v4l2 applications. 
+Some examples are provided in the sections belows.
+
+.. _V4L2 API: https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/v4l2.html
+
+
+Grabbing frames
+---------------
+Making the sensor stream is not difficult, but the developer has to give special attention to its capture platform specificities, and especially :
+
+- `Supported I/O streaming methods`_ : :MMAP, USERPTR or DMABUF
+- `Supported planar APIs`_ : Single or Multi Planar support
+
+An example of grabbing application is provided in the ``examples`` folder and reproduced below.
+
+.. literalinclude:: ./examples/mpane_capture.c
+    :language: c
+
+This example targets Multi Planar capture platforms. 
+
+.. important ::
+    In order to test the example, the media controller pipeline should be first setup correctly !
+
+This example can be tested ::
+
+    # Compilation
+    gcc -Wall mpane_capture.c -o mpane_capture
+    # Grab 10 frames (480x640) in raw8 and save them on drive
+    ./mpane_capture
+
+Gstreamer can be used to convert the frames in JPG::
+
+    gst-launch-1.0 -vvv filesrc location=frame-000000.bin blocksize=307200 ! 'video/x-bayer,format=gbrg,width=640,height=480,framerate=1/1' ! bayer2rgb ! jpegenc ! filesink location=frame-000000.jpg
+
+.. _`Supported I/O streaming methods`: https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/io.html
+.. _Supported planar APIs: https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/planar-apis.html
+
+
+Updating sensor controls
+------------------------
+It's possible to change the sensor's V4L2 controls through an application.
+
+An example of application to change the sensors controls is provided in the ``examples`` folder and reproduced below.
+
+.. literalinclude:: ./examples/update_v4lctrl.c
+    :language: c
+
+The snippet of code above, 1) enumerate all available controls, 2) change the value of ``V4L2_CID_HFLIP`` control.
+
+This example can be easily tested ::
+
+    # Build it
+    gcc -Wall update_v4lctrl.c -o update_v4lctrl
+    # Run it
+    ./update_v4lctrl
+
+Depending of how the V4L2 Controls are implemented in the driver, they can be changed while the sensor is streaming or not.
+With the above example, the sensor must be stopped before the ``V4L2_CID_HFLIP`` control can be changed.
