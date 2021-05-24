@@ -5,10 +5,11 @@ VD56G3 on DragonBoard 410C
 ==========================
 
 .. Note::
-    This quickstart targets the dragonboard 410C platform. The global workflow is similar to the RPI one.
+    This quickstart targets the dragonboard 410C platform. This platform is based on qualcom SoC. The capture part is  a The global workflow is similar to the RPI one.
     The available implementation of V4L2 for the dragonboard is a little bit different than the one available for the RPI.
     Consequently, one of the main difference with the RPI is that the db410c will require media pipeline setup before streaming.
 
+https://www.kernel.org/doc/html/latest/admin-guide/media/qcom_camss.html
 
 Required Hardware
 =================

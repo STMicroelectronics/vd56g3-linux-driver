@@ -60,3 +60,13 @@ Custom Controls Definitions
     :doc: GPIO7 mode selection Control
 .. kernel-doc:: ./../src/st-vd56g3.c
     :doc: Temperature Control
+.. kernel-doc:: ./../src/st-vd56g3.c
+    :doc: AE - Light level target (%)
+.. kernel-doc:: ./../src/st-vd56g3.c
+    :doc: AE - Control Mode
+.. kernel-doc:: ./../src/st-vd56g3.c
+    :doc: AE - Flicker Frequency
+.. kernel-doc:: ./../src/st-vd56g3.c
+    :doc: AE - Convergence step proportion (%)
+.. kernel-doc:: ./../src/st-vd56g3.c
+    :doc: AE - Convergence leak proportion (per mil)

@@ -63,6 +63,11 @@
 #define OUTPUT_CTRL_IMAGE				1
 #define OUTPUT_CTRL__OPTICAL_FLOW_AND_IMAGE		2
 #define DEVICE_PATGEN_CTRL				0x0400
+#define DEVICE_AE_COMPILER_CONTROL			0x0430
+#define DEVICE_AE_COMPENSATION				0x043A
+#define DEVICE_AE_TARGET_PERCENTAGE			0x043C
+#define DEVICE_AE_STEP_PROPORTION			0x043E
+#define DEVICE_AE_LEAK_PROPORTION			0x0440
 #define DEVICE_EXP_MODE					0x044c
 #define DEVICE_MANUAL_ANALOG_GAIN			0x044d
 #define DEVICE_MANUAL_COARSE_EXPOSURE			0x044e
@@ -102,6 +107,11 @@
 #define V4L2_CID_GPIO7_MODE			(V4L2_CID_USER_BASE | 0x1017)
 
 #define V4L2_CID_TEMPERATURE			(V4L2_CID_USER_BASE | 0x1020)
+#define V4L2_CID_AE_TARGET_PERCENTAGE		(V4L2_CID_USER_BASE | 0x1021)
+#define V4L2_CID_AE_CONTROL_MODE		(V4L2_CID_USER_BASE | 0x1022)
+#define V4L2_CID_AE_CONTROL_FLICKER_FREQ	(V4L2_CID_USER_BASE | 0x1023)
+#define V4L2_CID_AE_STEP_PROPORTION		(V4L2_CID_USER_BASE | 0x1024)
+#define V4L2_CID_AE_LEAK_PROPORTION		(V4L2_CID_USER_BASE | 0x1025)
 /* parse-SNAP: */
 
 #include "st-vd56g3_patch_cut1.c"
@@ -117,6 +127,16 @@ static const char * const vd56g3_gpios_modes[] = {
 	"disabled",
 	"strobe envelope positive",
 	"strobe envelope negative",
+};
+
+static const char * const vd56g3_ae_mode[] = {
+	"Priority to minimum gain",
+	"Priority to flicker free",
+};
+
+static const char * const vd56g3_ae_flicker_freq[] = {
+	"50Hz",
+	"60Hz",
 };
 
 /* regulator supplies */
@@ -217,6 +237,8 @@ struct vd56g3_dev {
 	/* lock to protect all members below */
 	struct mutex lock;
 	struct v4l2_ctrl_handler ctrl_handler;
+	struct v4l2_ctrl *ae_ctrl_mode_ctrl;
+	struct v4l2_ctrl *ae_flicker_freq_ctrl;
 	bool streaming;
 	struct v4l2_mbus_framefmt fmt;
 	const struct vd56g3_mode_info *current_mode;
@@ -1636,19 +1658,24 @@ static const struct media_entity_operations vd56g3_subdev_entity_ops = {
  *
  * In addition to standard V4L2 control, the vd56g3 driver also defines specific custom controls.
  *
- * ============================ ================================================
- *  Custom V4L2 Control          Description
- * ============================ ================================================
- *  ``V4L2_CID_GPIO0_MODE``	 `GPIO0 mode selection Control`_
- *  ``V4L2_CID_GPIO1_MODE``      `GPIO1 mode selection Control`_
- *  ``V4L2_CID_GPIO2_MODE``      `GPIO2 mode selection Control`_
- *  ``V4L2_CID_GPIO3_MODE``      `GPIO3 mode selection Control`_
- *  ``V4L2_CID_GPIO4_MODE``      `GPIO4 mode selection Control`_
- *  ``V4L2_CID_GPIO5_MODE``      `GPIO5 mode selection Control`_
- *  ``V4L2_CID_GPIO6_MODE``      `GPIO6 mode selection Control`_
- *  ``V4L2_CID_GPIO7_MODE``      `GPIO7 mode selection Control`_
- *  ``V4L2_CID_TEMPERATURE``     `Temperature Control`_
- * ============================ ================================================
+ * ====================================== ======================================
+ *  Custom V4L2 Control                    Description
+ * ====================================== ======================================
+ *  ``V4L2_CID_GPIO0_MODE``	           `GPIO0 mode selection Control`_
+ *  ``V4L2_CID_GPIO1_MODE``                `GPIO1 mode selection Control`_
+ *  ``V4L2_CID_GPIO2_MODE``                `GPIO2 mode selection Control`_
+ *  ``V4L2_CID_GPIO3_MODE``                `GPIO3 mode selection Control`_
+ *  ``V4L2_CID_GPIO4_MODE``                `GPIO4 mode selection Control`_
+ *  ``V4L2_CID_GPIO5_MODE``                `GPIO5 mode selection Control`_
+ *  ``V4L2_CID_GPIO6_MODE``                `GPIO6 mode selection Control`_
+ *  ``V4L2_CID_GPIO7_MODE``                `GPIO7 mode selection Control`_
+ *  ``V4L2_CID_TEMPERATURE``               `Temperature Control`_
+ *  ``V4L2_CID_AE_TARGET_PERCENTAGE``      `AE - Light level target (%)`_
+ *  ``V4L2_CID_AE_CONTROL_MODE``           `AE - Control Mode`_
+ *  ``V4L2_CID_AE_CONTROL_FLICKER_FREQ``   `AE - Flicker Frequency`_
+ *  ``V4L2_CID_AE_STEP_PROPORTION``        `AE - Convergence step proportion (%)`_
+ *  ``V4L2_CID_AE_LEAK_PROPORTION``        `AE - Convergence leak proportion (per mil)`_
+ * ====================================== ======================================
  *
  * .. _CSI transmitter: https://www.kernel.org/doc/html/latest/driver-api/media/csi2.html
  * .. _V4L2 User Controls: https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/control.html?#control-ids
@@ -1726,6 +1753,35 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_GPIO7_MODE:
 		ret = vd56g3_update_gpiox_strobe_mode(sensor, ctrl->val,
 			ctrl->id - V4L2_CID_GPIO0_MODE);
+		break;
+	case V4L2_CID_AE_TARGET_PERCENTAGE:
+		ret = vd56g3_write_reg16(sensor, DEVICE_AE_TARGET_PERCENTAGE, ctrl->val);
+		if (ret)
+			return ret;
+		break;
+	case V4L2_CID_AE_CONTROL_MODE:
+		ret = vd56g3_write_reg(sensor, DEVICE_AE_COMPILER_CONTROL,
+				       sensor->ae_flicker_freq_ctrl->val << 1 | ctrl->val);
+		if (ret)
+			return ret;
+		break;
+	case V4L2_CID_AE_CONTROL_FLICKER_FREQ:
+		ret = vd56g3_write_reg(sensor, DEVICE_AE_COMPILER_CONTROL,
+				       ctrl->val << 1 | sensor->ae_ctrl_mode_ctrl->val);
+		if (ret)
+			return ret;
+		break;
+	case V4L2_CID_AE_STEP_PROPORTION:
+		ret = vd56g3_write_reg16(sensor, DEVICE_AE_STEP_PROPORTION,
+					 DIV_ROUND_CLOSEST(ctrl->val * 256, 100));
+		if (ret)
+			return ret;
+		break;
+	case V4L2_CID_AE_LEAK_PROPORTION:
+		ret = vd56g3_write_reg16(sensor, DEVICE_AE_LEAK_PROPORTION,
+					 DIV_ROUND_CLOSEST(ctrl->val * 32768, 1000));
+		if (ret)
+			return ret;
 		break;
 	default:
 		ret = -EINVAL;
@@ -1904,6 +1960,140 @@ static const struct v4l2_ctrl_config vd56g3_temp_ctrl = {
 	.step		= 1,
 };
 
+/**
+ * DOC: AE - Light level target (%)
+ *
+ * The AE algorithm targets a level of luminance as a percent of the saturation level.
+ *
+ * Lower value means darker image, Higher value means brighter image (100% means saturated image).
+ *
+ * :id:     ``V4L2_CID_AE_TARGET_PERCENTAGE``
+ * :type:   ``V4L2_CTRL_TYPE_INTEGER``
+ * :min:    0
+ * :max:    100
+ * :def:    27
+ */
+static const struct v4l2_ctrl_config vd56g3_ae_target_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_AE_TARGET_PERCENTAGE,
+	.name		= "AE - Light level target (%)",
+	.type		= V4L2_CTRL_TYPE_INTEGER,
+	.min		= 0,
+	.max		= 100,
+	.def		= 27,
+	.step		= 1
+};
+
+/**
+ * DOC: AE - Control Mode
+ *
+ * Two AE modes are available.
+ *
+ *     - priority to minimum gains. The AE algorithm minimizes both digital and analog gains, then adjusts the integration time.
+ *     - priority to flicker free exposure. The AE algorithm prioritizes the integration time in multiples of half the flicker period
+ *
+ * :id:     ``V4L2_CID_AE_CONTROL_MODE``
+ * :type:   ``V4L2_CTRL_TYPE_MENU``
+ * :qmenu:  "Priority to minimum gain", "Priority to flicker free"
+ * :def:    "Priority to minimum gain"
+ */
+static const struct v4l2_ctrl_config vd56g3_ae_ctrl_mode_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_AE_CONTROL_MODE,
+	.name		= "AE - Control Mode",
+	.type		= V4L2_CTRL_TYPE_MENU,
+	.max		= ARRAY_SIZE(vd56g3_ae_mode) - 1,
+	.qmenu		= vd56g3_ae_mode,
+};
+
+/**
+ * DOC: AE - Flicker Frequency
+ *
+ * Two frequencies are available for Flicker free mode (see `AE - Control Mode`_):
+ *
+ *     - 50 Hz, the AE algorithm tries to set the integration time to a multiple of 10 ms
+ *     - 60 Hz, the AE algorithm tries to set the integration time to a multiple of 8.33 ms
+ *
+ * .. note::
+ *     For lower integration times, the flicker free condition is not respected
+ *
+ * :id:     ``V4L2_CID_AE_CONTROL_FLICKER_FREQ``
+ * :type:   ``V4L2_CTRL_TYPE_MENU``
+ * :qmenu:  "50Hz", "60Hz"
+ * :def:    "50Hz"
+ */
+static const struct v4l2_ctrl_config vd56g3_ae_flicker_freq_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_AE_CONTROL_FLICKER_FREQ,
+	.name		= "AE - Flicker Frequency",
+	.type		= V4L2_CTRL_TYPE_MENU,
+	.max		= ARRAY_SIZE(vd56g3_ae_flicker_freq) - 1,
+	.qmenu		= vd56g3_ae_flicker_freq,
+};
+
+/**
+ * DOC: AE - Convergence step proportion (%)
+ *
+ * The AE convergence loop can be fined tuned.
+ *
+ * This parameter controls convergence speed. It is the damping factor for the exposure variation.
+ * The step proportion range is [0.0 .. 1.0] :
+ *
+ *    - 0.0, the exposure is frozen
+ *    - 0.5, operation is at half speed (default)
+ *    - 1.0, operation is at full speed (not recommended)
+ *
+ * The current V4L2 control is expressed in **per cent.**
+ *
+ * :id:     ``V4L2_CID_AE_STEP_PROPORTION``
+ * :type:   ``V4L2_CTRL_TYPE_INTEGER``
+ * :min:    0
+ * :max:    100
+ * :def:    50
+ */
+static const struct v4l2_ctrl_config vd56g3_ae_step_prop_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_AE_STEP_PROPORTION,
+	.name		= "AE - Convg. step prop. (%)",
+	.type		= V4L2_CTRL_TYPE_INTEGER,
+	.min		= 0,
+	.max		= 100,
+	.def		= 50,
+	.step		= 1
+};
+
+/**
+ * DOC: AE - Convergence leak proportion (per mil)
+ *
+ * The AE convergence loop can be fined tuned.
+ *
+ * This parameter controls reactivity.
+ * The convergence algorithm contains a leaky integrator that average the image statistics over time and smoothes the luminance transition.
+ *
+ * The leak proportion range is [0.0 .. 1.0] :
+ *
+ *    - 0.0, statistics are frozen at the previous value
+ *    - 1.0, statistics are forced to the current frame statistic
+ *
+ * The current V4L2 control is expressed in **per mille.**
+ *
+ * :id:     ``V4L2_CID_AE_LEAK_PROPORTION``
+ * :type:   ``V4L2_CTRL_TYPE_INTEGER``
+ * :min:    0
+ * :max:    1000
+ * :def:    50
+ */
+static const struct v4l2_ctrl_config vd56g3_ae_leak_prop_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_AE_LEAK_PROPORTION,
+	.name		= "AE - Convg leak prop. (per mil)",
+	.type		= V4L2_CTRL_TYPE_INTEGER,
+	.min		= 0,
+	.max		= 1000,
+	.def		= 50,
+	.step		= 1
+};
+
 static int vd56g3_init_controls(struct vd56g3_dev *sensor)
 {
 	const struct v4l2_ctrl_ops *ops = &vd56g3_ctrl_ops;
@@ -1949,7 +2139,12 @@ static int vd56g3_init_controls(struct vd56g3_dev *sensor)
 	/* temperature */
 	ctrl = v4l2_ctrl_new_custom(hdl, &vd56g3_temp_ctrl, NULL);
 	ctrl->flags |= V4L2_CTRL_FLAG_VOLATILE | V4L2_CTRL_FLAG_READ_ONLY;
-
+	/* AE controls */
+	v4l2_ctrl_new_custom(hdl, &vd56g3_ae_target_ctrl, NULL);
+	sensor->ae_ctrl_mode_ctrl = v4l2_ctrl_new_custom(hdl, &vd56g3_ae_ctrl_mode_ctrl, NULL);
+	sensor->ae_flicker_freq_ctrl = v4l2_ctrl_new_custom(hdl, &vd56g3_ae_flicker_freq_ctrl, NULL);
+	v4l2_ctrl_new_custom(hdl, &vd56g3_ae_step_prop_ctrl, NULL);
+	v4l2_ctrl_new_custom(hdl, &vd56g3_ae_leak_prop_ctrl, NULL);
 	if (hdl->error) {
 		ret = hdl->error;
 		goto free_ctrls;
