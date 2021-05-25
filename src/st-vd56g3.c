@@ -1769,8 +1769,6 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_AUTO_EXPOSURE_BIAS:
 		ret = vd56g3_write_reg16(sensor, DEVICE_AE_COMPENSATION,
 					 DIV_ROUND_CLOSEST((int) ev_bias_qmenu[ctrl->val] * 256, 1000));
-		if (ret)
-			return ret;
 		break;
 	case V4L2_CID_GPIO0_MODE:
 	case V4L2_CID_GPIO1_MODE:
@@ -1785,32 +1783,22 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	case V4L2_CID_AE_TARGET_PERCENTAGE:
 		ret = vd56g3_write_reg16(sensor, DEVICE_AE_TARGET_PERCENTAGE, ctrl->val);
-		if (ret)
-			return ret;
 		break;
 	case V4L2_CID_AE_CONTROL_MODE:
 		ret = vd56g3_write_reg(sensor, DEVICE_AE_COMPILER_CONTROL,
 				       sensor->ae_flicker_freq_ctrl->val << 1 | ctrl->val);
-		if (ret)
-			return ret;
 		break;
 	case V4L2_CID_AE_CONTROL_FLICKER_FREQ:
 		ret = vd56g3_write_reg(sensor, DEVICE_AE_COMPILER_CONTROL,
 				       ctrl->val << 1 | sensor->ae_ctrl_mode_ctrl->val);
-		if (ret)
-			return ret;
 		break;
 	case V4L2_CID_AE_STEP_PROPORTION:
 		ret = vd56g3_write_reg16(sensor, DEVICE_AE_STEP_PROPORTION,
 					 DIV_ROUND_CLOSEST(ctrl->val * 256, 100));
-		if (ret)
-			return ret;
 		break;
 	case V4L2_CID_AE_LEAK_PROPORTION:
 		ret = vd56g3_write_reg16(sensor, DEVICE_AE_LEAK_PROPORTION,
 					 DIV_ROUND_CLOSEST(ctrl->val * 32768, 1000));
-		if (ret)
-			return ret;
 		break;
 	default:
 		ret = -EINVAL;
