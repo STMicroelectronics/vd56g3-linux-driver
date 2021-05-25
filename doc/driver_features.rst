@@ -70,3 +70,5 @@ Custom Controls Definitions
     :doc: AE - Convergence step proportion (%)
 .. kernel-doc:: ./../src/st-vd56g3.c
     :doc: AE - Convergence leak proportion (per mil)
+.. kernel-doc:: ./../src/st-vd56g3.c
+    :doc: AE - Exposure compensation

@@ -139,6 +139,12 @@ static const char * const vd56g3_ae_flicker_freq[] = {
 	"60Hz",
 };
 
+/* Supported exposure bias values (-4.0EV .. +4.0EV) */
+static const s64 ev_bias_qmenu[] = {
+	-4000, -3500, -3000, -2500, -2000, -1500, -1000, -500,
+	0, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000
+};
+
 /* regulator supplies */
 static const char * const vd56g3_supply_name[] = {
 	"VCORE",
@@ -1642,19 +1648,20 @@ static const struct media_entity_operations vd56g3_subdev_entity_ops = {
  *
  * The vd56g3 driver implements the following list of standard V4L2 controls.
  *
- * ============================ ================================================
- *  Standard V4L2 Control        Description
- * ============================ ================================================
- *  ``V4L2_CID_PIXEL_RATE``      Pixel rate (mandatory for a `CSI transmitter`_)
- *  ``V4L2_CID_LINK_FREQ``       Link frequency (mandatory for a `CSI transmitter`_)
- *  ``V4L2_CID_VFLIP``           Vertical flip (see `V4L2 User Controls`_)
- *  ``V4L2_CID_HFLIP``           Horizontal flip (see `V4L2 User Controls`_)
- *  ``V4L2_CID_TEST_PATTERN``    Test pattern generation (see `V4L2 Image Process Controls`_)
- *  ``V4L2_CID_EXPOSURE_AUTO``   Auto Exposure (see `V4L2 Camera Controls`_)
- *  ``V4L2_CID_3A_LOCK``         Lock/Unlock auto expo (see `V4L2 Camera Controls`_)
- *  ``V4L2_CID_GAIN``            Gain setting when auto expo is disabled (see `V4L2 User Controls`_)
- *  ``V4L2_CID_EXPOSURE``        Exposure setting when auto expo is disabled (see `V4L2 User Controls`_)
- * ============================ ================================================
+ * ================================= ===========================================
+ *  Standard V4L2 Control             Description
+ * ================================= ===========================================
+ *  ``V4L2_CID_PIXEL_RATE``           Pixel rate (mandatory for a `CSI transmitter`_)
+ *  ``V4L2_CID_LINK_FREQ``            Link frequency (mandatory for a `CSI transmitter`_)
+ *  ``V4L2_CID_VFLIP``                Vertical flip (see `V4L2 User Controls`_)
+ *  ``V4L2_CID_HFLIP``                Horizontal flip (see `V4L2 User Controls`_)
+ *  ``V4L2_CID_TEST_PATTERN``         Test pattern generation (see `V4L2 Image Process Controls`_)
+ *  ``V4L2_CID_EXPOSURE_AUTO``        Auto Exposure (see `V4L2 Camera Controls`_)
+ *  ``V4L2_CID_3A_LOCK``              Lock/Unlock auto expo (see `V4L2 Camera Controls`_)
+ *  ``V4L2_CID_AUTO_EXPOSURE_BIAS``   `AE - Exposure compensation`_
+ *  ``V4L2_CID_GAIN``                 Gain setting when auto expo is disabled (see `V4L2 User Controls`_)
+ *  ``V4L2_CID_EXPOSURE``             Exposure setting when auto expo is disabled (see `V4L2 User Controls`_)
+ * ================================= ===========================================
  *
  * In addition to standard V4L2 control, the vd56g3 driver also defines specific custom controls.
  *
@@ -1682,6 +1689,22 @@ static const struct media_entity_operations vd56g3_subdev_entity_ops = {
  * .. _V4L2 Image Process Controls: https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/ext-ctrls-image-process.html?#image-process-control-ids
  * .. _V4L2 Camera Controls: https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/ext-ctrls-camera.html?#camera-control-ids
  */
+
+/**
+ * DOC: AE - Exposure compensation
+ *
+ * Determines the automatic exposure compensation (see `V4L2 Camera Controls`_).
+ *
+ * Supported exposure bias values in range -4.0EV .. +4.0EV.
+ *
+ * The control expresses the values as 0.001 EV units, where the value 1000 stands for +1 EV
+ *
+ * :id:         ``V4L2_CID_AUTO_EXPOSURE_BIAS``
+ * :type:       ``V4L2_CTRL_TYPE_INTEGER_MENU``
+ * :qmenu_int:  -4000, -3500, -3000, -2500, -2000, -1500, -1000, -500, 0, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000
+ * :def:        0
+ */
+
 static int vd56g3_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct v4l2_subdev *sd = ctrl_to_sd(ctrl);
@@ -1742,6 +1765,12 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	case V4L2_CID_3A_LOCK:
 		ret = vd56g3_lock_exposure(sensor, ctrl->val);
+		break;
+	case V4L2_CID_AUTO_EXPOSURE_BIAS:
+		ret = vd56g3_write_reg16(sensor, DEVICE_AE_COMPENSATION,
+					 DIV_ROUND_CLOSEST((int) ev_bias_qmenu[ctrl->val] * 256, 1000));
+		if (ret)
+			return ret;
 		break;
 	case V4L2_CID_GPIO0_MODE:
 	case V4L2_CID_GPIO1_MODE:
@@ -2127,6 +2156,11 @@ static int vd56g3_init_controls(struct vd56g3_dev *sensor)
 	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_EXPOSURE, 1, 500, 1, 10);
 	/* V4L2_CID_3A_LOCK */
 	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_3A_LOCK, 0, 7, 0, 0);
+	/* V4L2_CID_AUTO_EXPOSURE_BIAS */
+	v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_AUTO_EXPOSURE_BIAS,
+			       ARRAY_SIZE(ev_bias_qmenu) - 1,
+			       (ARRAY_SIZE(ev_bias_qmenu) + 1 ) / 2 - 1,
+			       ev_bias_qmenu);
 	/* gpios stuff */
 	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio0_ctrl, NULL);
 	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio1_ctrl, NULL);
