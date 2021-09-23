@@ -51,10 +51,15 @@ modules.builtin
 /Module.markers
 Module.symvers
 
-#
-# Debian directory (make deb-pkg)
-#
-/debian/
+# Debian package build output
+# Ignore
+debian/debhelper-build-stamp
+debian/files
+debian/.debhelper/
+debian/st-vd56g3-dkms*
+debianizer/
+# Allow
+!debian/st-vd56g3-dkms.dkms
 
 #
 # git files that we don't want to ignore even it they are dot-files
