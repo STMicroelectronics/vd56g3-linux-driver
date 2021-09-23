@@ -1,8 +1,8 @@
-st-vd56g3-st-dkms (0.5.0) UNRELEASED; urgency=medium
+st-vd56g3-st-dkms (0.4-1) unstable; urgency=medium
 
-  * unreleased
+  * Update packaging flow
 
- -- Mickael Guene <mickael.guene@st.com>  Fri, 13 Dec 2019 13:10:44 +0100
+ -- Benjamin Mugnier <benjamin.mugnier@st.com>  Thu, 23 Sep 2021 11:41:30 +0200
 
 st-vd56g3-st-dkms (0.4.0) buster; urgency=medium
 
