@@ -8,7 +8,7 @@ pipeline {
 			steps {
 				// Checkout SCM is done by Jenkins himself
 				sh 'sudo -E apt-get update'
-				sh 'sudo -E apt-get install linux-headers-generic dkms equivs -y'
+				sh 'sudo -E apt-get install linux-headers-generic dkms equivs devscripts -y'
 				//Remove old kernels
 				sh 'sudo -E apt-get autoremove -y'
 			}
