@@ -2,6 +2,10 @@ pipeline {
 	agent {
 		label 'os-ubuntu2004'
 	}
+	environment {
+		HTTP_PROXY = credentials('proxy')
+		HTTPS_PROXY = credentials('proxy')
+	}
 
 	stages {
 		stage('Prepare') {
