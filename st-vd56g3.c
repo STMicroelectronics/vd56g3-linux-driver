@@ -1181,7 +1181,11 @@ out:
 
 /* implement v4l2_subdev_pad_ops */
 static int vd56g3_enum_mbus_code(struct v4l2_subdev *sd,
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 				 struct v4l2_subdev_pad_config *cfg,
+#else
+				 struct v4l2_subdev_state *sd_state,
+#endif
 				 struct v4l2_subdev_mbus_code_enum *code)
 {
 	struct vd56g3_dev *sensor = to_vd56g3_dev(sd);
@@ -1197,7 +1201,11 @@ static int vd56g3_enum_mbus_code(struct v4l2_subdev *sd,
 }
 
 static int vd56g3_get_fmt(struct v4l2_subdev *sd,
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 			  struct v4l2_subdev_pad_config *cfg,
+#else
+			  struct v4l2_subdev_state *sd_state,
+#endif
 			  struct v4l2_subdev_format *format)
 {
 	struct vd56g3_dev *sensor = to_vd56g3_dev(sd);
@@ -1211,7 +1219,11 @@ static int vd56g3_get_fmt(struct v4l2_subdev *sd,
 	mutex_lock(&sensor->lock);
 
 	if (format->which == V4L2_SUBDEV_FORMAT_TRY)
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 		fmt = v4l2_subdev_get_try_format(&sensor->sd, cfg,
+#else
+		fmt = v4l2_subdev_get_try_format(&sensor->sd, sd_state,
+#endif
 						 format->pad);
 	else
 		fmt = &sensor->fmt;
@@ -1224,7 +1236,11 @@ static int vd56g3_get_fmt(struct v4l2_subdev *sd,
 }
 
 static int vd56g3_set_fmt(struct v4l2_subdev *sd,
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 			  struct v4l2_subdev_pad_config *cfg,
+#else
+			  struct v4l2_subdev_state *sd_state,
+#endif
 			  struct v4l2_subdev_format *format)
 {
 	struct vd56g3_dev *sensor = to_vd56g3_dev(sd);
@@ -1252,7 +1268,11 @@ static int vd56g3_set_fmt(struct v4l2_subdev *sd,
 		goto out;
 
 	if (format->which == V4L2_SUBDEV_FORMAT_TRY) {
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 		fmt = v4l2_subdev_get_try_format(sd, cfg, 0);
+#else
+		fmt = v4l2_subdev_get_try_format(sd, sd_state, 0);
+#endif
 	} else {
 		fmt = &sensor->fmt;
 		sensor->current_mode = new_mode;
@@ -1266,7 +1286,11 @@ out:
 }
 
 static int vd56g3_enum_frame_size(struct v4l2_subdev *sd,
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 				  struct v4l2_subdev_pad_config *cfg,
+#else
+				  struct v4l2_subdev_state *sd_state,
+#endif
 				  struct v4l2_subdev_frame_size_enum *fse)
 {
 	struct vd56g3_dev *sensor = to_vd56g3_dev(sd);
@@ -1287,7 +1311,11 @@ static int vd56g3_enum_frame_size(struct v4l2_subdev *sd,
 }
 
 static int vd56g3_enum_frame_interval(struct v4l2_subdev *sd,
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 				      struct v4l2_subdev_pad_config *cfg,
+#else
+				      struct v4l2_subdev_state *sd_state,
+#endif
 				      struct v4l2_subdev_frame_interval_enum
 				      *fie)
 {

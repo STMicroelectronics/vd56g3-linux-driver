@@ -2,13 +2,17 @@ pipeline {
 	agent {
 		label 'os-ubuntu2004'
 	}
+	environment {
+		HTTP_PROXY = credentials('proxy')
+		HTTPS_PROXY = credentials('proxy')
+	}
 
 	stages {
 		stage('Prepare') {
 			steps {
 				// Checkout SCM is done by Jenkins himself
 				sh 'sudo -E apt-get update'
-				sh 'sudo -E apt-get install linux-headers-generic dkms equivs -y'
+				sh 'sudo -E apt-get install linux-headers-generic dkms equivs devscripts -y'
 				//Remove old kernels
 				sh 'sudo -E apt-get autoremove -y'
 			}
