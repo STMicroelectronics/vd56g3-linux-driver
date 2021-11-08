@@ -19,7 +19,7 @@ pipeline {
 		}
 		stage('Build') {
 			steps {
-				sh 'make KVERSION=$(ls /lib/modules/)'
+				sh 'make KVERSION=$(ls /lib/modules/) -C src'
 			}
 		}
 		stage('Test') {

@@ -26,7 +26,11 @@
 
 #define DEVICE_MODEL_ID_REG				0x0000
 #define VD56G3_MODEL_ID					0x5603
+#define DEVICE_REVISION					0x0002
 #define DEVICE_FWPATCH_REVISION				0x001e
+#define DEVICE_VTIMING_RD_REVISION			0x0020
+#define DEVICE_VTIMING_GR_REVISION			0x0024
+#define DEVICE_VTIMING_GT_REVISION			0x0026
 #define DEVICE_SYSTEM_FSM				0x0028
 #define SENSOR_READY_TO_BOOT				0x01
 #define SENSOR_SW_STBY					0x02
@@ -40,6 +44,9 @@
 #define CMD_THSENS_READ					4
 #define DEVICE_STREAMING				0x0202
 #define CMD_STOP_STREAM					1
+#define DEVICE_DEBUG					0x0203
+#define CMD_START_VTRAM_UPDATE				1
+#define CMD_END_VTRAM_UPDATE				2
 #define DEVICE_EXT_CLOCK				0x0220
 #define DEVICE_CLK_PLL_PREDIV				0x0224
 #define DEVICE_CLK_SYS_PLL_MULT				0x0226
@@ -56,6 +63,11 @@
 #define OUTPUT_CTRL_IMAGE				1
 #define OUTPUT_CTRL__OPTICAL_FLOW_AND_IMAGE		2
 #define DEVICE_PATGEN_CTRL				0x0400
+#define DEVICE_AE_COMPILER_CONTROL			0x0430
+#define DEVICE_AE_COMPENSATION				0x043A
+#define DEVICE_AE_TARGET_PERCENTAGE			0x043C
+#define DEVICE_AE_STEP_PROPORTION			0x043E
+#define DEVICE_AE_LEAK_PROPORTION			0x0440
 #define DEVICE_EXP_MODE					0x044c
 #define DEVICE_MANUAL_ANALOG_GAIN			0x044d
 #define DEVICE_MANUAL_COARSE_EXPOSURE			0x044e
@@ -76,11 +88,15 @@
 #define DEVICE_GPIO_5_CTRL				0x046c
 #define DEVICE_GPIO_6_CTRL				0x046d
 #define DEVICE_GPIO_7_CTRL				0x046e
-#define DEVICE_READOUT_CTRL				0x048e
+#define DEVICE_EXP_COARSE_INTG_MARGIN			0x0946
+//TODO : Clean Me
+#define DEVICE_READOUT_CTRL_CUT1			0x048e
+#define DEVICE_READOUT_CTRL_CUT2			0x047e
 
 #define SENSOR_WIDTH					1124
 #define SENSOR_HEIGHT					1364
 
+/* parse-SNIP: Custom-CIDs*/
 #define V4L2_CID_GPIO0_MODE			(V4L2_CID_USER_BASE | 0x1010)
 #define V4L2_CID_GPIO1_MODE			(V4L2_CID_USER_BASE | 0x1011)
 #define V4L2_CID_GPIO2_MODE			(V4L2_CID_USER_BASE | 0x1012)
@@ -91,8 +107,16 @@
 #define V4L2_CID_GPIO7_MODE			(V4L2_CID_USER_BASE | 0x1017)
 
 #define V4L2_CID_TEMPERATURE			(V4L2_CID_USER_BASE | 0x1020)
+#define V4L2_CID_AE_TARGET_PERCENTAGE		(V4L2_CID_USER_BASE | 0x1021)
+#define V4L2_CID_AE_CONTROL_MODE		(V4L2_CID_USER_BASE | 0x1022)
+#define V4L2_CID_AE_CONTROL_FLICKER_FREQ	(V4L2_CID_USER_BASE | 0x1023)
+#define V4L2_CID_AE_STEP_PROPORTION		(V4L2_CID_USER_BASE | 0x1024)
+#define V4L2_CID_AE_LEAK_PROPORTION		(V4L2_CID_USER_BASE | 0x1025)
+/* parse-SNAP: */
 
-#include "st-vd56g3_patch.c"
+#include "st-vd56g3_patch_cut1.c"
+#include "st-vd56g3_patch_cut2.c"
+#include "st-vd56g3_vtpatch.c"
 
 static const char * const vd56g3_test_pattern_menu[] = {
 	"Disabled", "Solid", "Colorbar", "Gradbar",
@@ -103,6 +127,22 @@ static const char * const vd56g3_gpios_modes[] = {
 	"disabled",
 	"strobe envelope positive",
 	"strobe envelope negative",
+};
+
+static const char * const vd56g3_ae_mode[] = {
+	"Priority to minimum gain",
+	"Priority to flicker free",
+};
+
+static const char * const vd56g3_ae_flicker_freq[] = {
+	"50Hz",
+	"60Hz",
+};
+
+/* Supported exposure bias values (-4.0EV .. +4.0EV) */
+static const s64 ev_bias_qmenu[] = {
+	-4000, -3500, -3000, -2500, -2000, -1500, -1000, -500,
+	0, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000
 };
 
 /* regulator supplies */
@@ -144,6 +184,30 @@ static const u32 vd56g3_supported_codes[] = {
 	MEDIA_BUS_FMT_SGBRG10_1X10
 };
 
+/**
+ * DOC: Supported Modes
+ *
+ * The vd56g3 driver supports 8 modes described in the next table :
+ *
+ * ======= ======== ============
+ *  Width   Height   Binning
+ * ======= ======== ============
+ *   1124     1364   No Binning
+ *   1024     1280   No Binning
+ *   1024     1024   No Binning
+ *    720     1280   No Binning
+ *    640      480   No Binning
+ *    480      640   Binning x2
+ *    320      240   Binning x2
+ *    240      320   Binning x4
+ * ======= ======== ============
+ *
+ * For each mode, 9 framerates are supported : 90, 60, 50, 30, 25, 15, 10, 5 and 1 FPS.
+ *
+ * The selection of the desired resolution / framerate is done through standard V4L2 API.
+ * VD56G3 driver implements common camera-type operations (see below the list of supported V4L2 operations).
+ */
+
 const int vd56g3_sensor_frame_rates[] = { 90, 60, 50, 30, 25, 15, 10, 5, 1 };
 
 static const struct vd56g3_mode_info vd56g3_mode_data[] = {
@@ -179,6 +243,8 @@ struct vd56g3_dev {
 	/* lock to protect all members below */
 	struct mutex lock;
 	struct v4l2_ctrl_handler ctrl_handler;
+	struct v4l2_ctrl *ae_ctrl_mode_ctrl;
+	struct v4l2_ctrl *ae_flicker_freq_ctrl;
 	bool streaming;
 	struct v4l2_mbus_framefmt fmt;
 	const struct vd56g3_mode_info *current_mode;
@@ -187,6 +253,8 @@ struct vd56g3_dev {
 	bool vflip;
 	int manual_expo_ms;
 	enum vd56g3_expo_state expo_state;
+	/* TODO: remove later */
+	bool is_cut2;
 };
 
 /* helpers */
@@ -667,6 +735,7 @@ static int vd56g3_detect(struct vd56g3_dev *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
 	u16 id = 0;
+	u16 device_revision;
 	int ret;
 
 	ret = vd56g3_wait_state(sensor, SENSOR_READY_TO_BOOT);
@@ -679,6 +748,19 @@ static int vd56g3_detect(struct vd56g3_dev *sensor)
 
 	if (id != VD56G3_MODEL_ID) {
 		dev_warn(&client->dev, "Unsupported sensor id %x", id);
+		return -ENODEV;
+	}
+
+	ret = vd56g3_read_reg16(sensor, DEVICE_REVISION, &device_revision);
+	if (ret)
+		return ret;
+
+	if ((device_revision >> 8) == 0x20) {
+		sensor->is_cut2 = true;
+	} else if ((device_revision >> 8) == 0x10) {
+		sensor->is_cut2 = false;
+	} else {
+		dev_warn(&client->dev, "Unsupported Cut version %x", device_revision);
 		return -ENODEV;
 	}
 
@@ -760,8 +842,13 @@ static int vd56g3_stream_enable(struct vd56g3_dev *sensor)
 		return ret;
 
 	/* configure size and bin mode */
-	ret = vd56g3_write_reg(sensor, DEVICE_READOUT_CTRL,
-			       sensor->current_mode->bin_mode);
+	if (sensor->is_cut2) {
+		ret = vd56g3_write_reg(sensor, DEVICE_READOUT_CTRL_CUT2,
+				sensor->current_mode->bin_mode);
+	} else {
+		ret = vd56g3_write_reg(sensor, DEVICE_READOUT_CTRL_CUT1,
+				sensor->current_mode->bin_mode);
+	}
 	if (ret)
 		return ret;
 	ret = vd56g3_write_reg16(sensor, DEVICE_ROI_X_START,
@@ -980,11 +1067,24 @@ error_alloc:
 static int vd56g3_patch(struct vd56g3_dev *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
-	u16 patch;
+	const u8 *patch;
+	int patch_size;
+	u8 patch_major;
+	u8 patch_minor;
+	u16 cur_patch_rev;
 	int ret;
 
-	ret = vd56g3_write_array(sensor, 0x2000, sizeof(array_0x2000),
-				 array_0x2000);
+	if (sensor->is_cut2) {
+		patch = patch_cut2;
+		patch_size = sizeof(patch_cut2);
+	} else {
+		patch = patch_cut1;
+		patch_size = sizeof(patch_cut1);
+	}
+	patch_major = patch[3];
+	patch_minor = patch[2];
+
+	ret = vd56g3_write_array(sensor, 0x2000, patch_size, patch);
 	if (ret)
 		return ret;
 
@@ -996,19 +1096,17 @@ static int vd56g3_patch(struct vd56g3_dev *sensor)
 	if (ret)
 		return ret;
 
-	ret = vd56g3_read_reg16(sensor, DEVICE_FWPATCH_REVISION, &patch);
+	ret = vd56g3_read_reg16(sensor, DEVICE_FWPATCH_REVISION, &cur_patch_rev);
 	if (ret)
 		return ret;
 
-	if (patch != (DEVICE_FWPATCH_REVISION_MAJOR << 8) +
-	    DEVICE_FWPATCH_REVISION_MINOR) {
+	if (cur_patch_rev != (patch_major << 8) + patch_minor) {
 		dev_err(&client->dev, "bad patch version expected %d.%d got %d.%d",
-			DEVICE_FWPATCH_REVISION_MAJOR,
-			DEVICE_FWPATCH_REVISION_MINOR,
-			patch >> 8, patch & 0xff);
+			patch_major, patch_minor,
+			cur_patch_rev >> 8, cur_patch_rev & 0xff);
 		return -ENODEV;
 	}
-	dev_info(&client->dev, "patch %d.%d applied", patch >> 8, patch & 0xff);
+	dev_info(&client->dev, "patch %d.%d applied", cur_patch_rev >> 8, cur_patch_rev & 0xff);
 
 	return 0;
 }
@@ -1031,6 +1129,85 @@ static int vd56g3_boot(struct vd56g3_dev *sensor)
 		return ret;
 
 	dev_info(&client->dev, "sensor boot successfully");
+
+	return 0;
+}
+
+static int vd56g3_vtpatch(struct vd56g3_dev *sensor)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	int i;
+	int vtpatch_offset = 0;
+	u8 cur_vtpatch_rd_rev, cur_vtpatch_gr_rev, cur_vtpatch_gt_rev;
+	int ret;
+
+	if (sensor->is_cut2) {
+		// VT Patch support only in Cut2.0
+		ret = vd56g3_write_reg(sensor, DEVICE_DEBUG, CMD_START_VTRAM_UPDATE);
+		if (ret)
+			return ret;
+
+		ret = vd56g3_poll_reg(sensor, DEVICE_DEBUG, 0);
+		if (ret)
+			return ret;
+
+		ret = vd56g3_wait_state(sensor, SENSOR_SW_STBY);
+		if (ret)
+			return ret;
+
+		for (i = 0; i < vtpatch_area_nb; i++)
+		{
+			ret = vd56g3_write_array(sensor, vtpatch_desc[i].offset, vtpatch_desc[i].size, vtpatch + vtpatch_offset);
+			if (ret)
+				return ret;
+
+			vtpatch_offset += vtpatch_desc[i].size;
+		}
+
+		// TODO replace with correct register names
+		ret = vd56g3_write_reg(sensor, 0xd9f8, VT_REVISION);
+		if (ret)
+			return ret;
+		ret = vd56g3_write_reg(sensor, 0xaffc, VT_REVISION);
+		if (ret)
+			return ret;
+		ret = vd56g3_write_reg(sensor, 0xbbb4, VT_REVISION);
+		if (ret)
+			return ret;
+		ret = vd56g3_write_reg(sensor, 0xb898, VT_REVISION);
+		if (ret)
+			return ret;
+
+		ret = vd56g3_write_reg(sensor, DEVICE_DEBUG, CMD_END_VTRAM_UPDATE);
+		if (ret)
+			return ret;
+
+		ret = vd56g3_poll_reg(sensor, DEVICE_DEBUG, 0);
+		if (ret)
+			return ret;
+
+		ret = vd56g3_wait_state(sensor, SENSOR_SW_STBY);
+		if (ret)
+			return ret;
+
+		ret = vd56g3_read_reg(sensor, DEVICE_VTIMING_RD_REVISION, &cur_vtpatch_rd_rev);
+		if (ret)
+			return ret;
+		ret = vd56g3_read_reg(sensor, DEVICE_VTIMING_GR_REVISION, &cur_vtpatch_gr_rev);
+		if (ret)
+			return ret;
+		ret = vd56g3_read_reg(sensor, DEVICE_VTIMING_GT_REVISION, &cur_vtpatch_gt_rev);
+		if (ret)
+			return ret;
+
+		if (cur_vtpatch_rd_rev != VT_REVISION || cur_vtpatch_gr_rev != VT_REVISION ||
+		    cur_vtpatch_gt_rev != VT_REVISION ) {
+			dev_err(&client->dev, "bad vtpatch version, expected %d got rd:%d, gr:%d gt:%d",
+				VT_REVISION, cur_vtpatch_rd_rev, cur_vtpatch_gr_rev, cur_vtpatch_gt_rev);
+			return -ENODEV;
+		}
+		dev_info(&client->dev, "VT patch %d applied", VT_REVISION);
+	}
 
 	return 0;
 }
@@ -1083,6 +1260,13 @@ static int vd56g3_configure(struct vd56g3_dev *sensor)
 			return ret;
 	}
 
+	if (sensor->is_cut2) {
+		/* Increment EXP_COARSE_INTG_MARGIN to ensure proper behavior with OF */
+		ret = vd56g3_write_reg16(sensor, DEVICE_EXP_COARSE_INTG_MARGIN,	68);
+		if (ret)
+			return ret;
+	}
+
 	sensor->data_rate_in_mbps = (mult * sensor->clk_freq) / prediv;
 	sensor->pclk = (sensor->data_rate_in_mbps * 2) / 10;
 	dev_dbg(&client->dev, "clock prediv = %d", prediv);
@@ -1093,7 +1277,37 @@ static int vd56g3_configure(struct vd56g3_dev *sensor)
 	return 0;
 }
 
-/* implement v4l2_subdev_video_ops */
+/**
+ * DOC: V4L2 exposed Operations
+ *
+ * **This sections contains all vd56g3 operations exposed through standard V4L2 API**
+ *
+ * See below the supported callbacks (categorized following V4L2 classification):
+ *
+ * - ``v4l2_subdev_core_ops``. **core ops** callbacks for subdev
+ *
+ *      + no callback defined here
+ *
+ * - ``v4l2_subdev_video_ops``: **video-related** callbacks
+ *
+ *      + vd56g3_s_stream(). V4L2 notification that a video stream will start or has stopped.
+ *      + vd56g3_g_frame_interval(). Callback to get the frame interval (period, in seconds, between consecutive video frames)
+ *      + vd56g3_s_frame_interval(). Callback to set the frame interval (period, in seconds, between consecutive video frames)
+ *
+ * - ``v4l2_subdev_pad_ops``: **pad-level** callbacks
+ *
+ *      + vd56g3_enum_mbus_code(). Callback to enumerate available media bus formats
+ *      + vd56g3_get_fmt() - Callback to get the frame format of specific subdev pads
+ *      + vd56g3_set_fmt() - Callback to set a given frame format
+ *      + vd56g3_enum_frame_size(). Callback to enumerate supported frame sizes
+ *      + vd56g3_enum_frame_interval(). Callback to enumerate available frame intervals
+ */
+
+/**
+ * vd56g3_s_stream - Callback notifying the streaming start
+ * @sd: v4l2 subdevice entry point
+ * @enable: enable or disable stream
+ */
 static int vd56g3_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	struct vd56g3_dev *sensor = to_vd56g3_dev(sd);
@@ -1119,6 +1333,14 @@ out:
 	return ret;
 }
 
+/**
+ * vd56g3_g_frame_interval - Callback to get the frame interval
+ * @sd: v4l2 subdevice entry point
+ * @fi: the frame_interval to retrieve
+ *
+ * This callback enables to retrieve the current frame interval.
+ * It will be triggered upon the VIDIOC_SUBDEV_G_FRAME_INTERVAL() ioctl call.
+ */
 static int vd56g3_g_frame_interval(struct v4l2_subdev *sd,
 				   struct v4l2_subdev_frame_interval *fi)
 {
@@ -1131,6 +1353,14 @@ static int vd56g3_g_frame_interval(struct v4l2_subdev *sd,
 	return 0;
 }
 
+/**
+ * vd56g3_s_frame_interval - Callback to set the frame interval
+ * @sd: v4l2 subdevice entry point
+ * @fi: the frame interval to set
+ *
+ * This callback enables to change the frame interval with the given @fi value.
+ * It will be triggered upon the VIDIOC_SUBDEV_S_FRAME_INTERVAL() ioctl call.
+ */
 static int vd56g3_s_frame_interval(struct v4l2_subdev *sd,
 				   struct v4l2_subdev_frame_interval *fi)
 {
@@ -1179,7 +1409,15 @@ out:
 	return ret;
 }
 
-/* implement v4l2_subdev_pad_ops */
+/**
+ * vd56g3_enum_mbus_code - Callback to enumerate available media bus formats
+ * @sd: v4l2 subdevice entry point
+ * @cfg: struct used for storing subdev pad information
+ * @code: pointer to struct v4l2_subdev_mbus_code_enum that the driver will fill with the available mbus format
+ *
+ * This callback enables to enumerate media bus formats available at a given sub-device pad.
+ * It will be triggered upon the VIDIOC_SUBDEV_ENUM_MBUS_CODE() ioctl call.
+ */
 static int vd56g3_enum_mbus_code(struct v4l2_subdev *sd,
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 				 struct v4l2_subdev_pad_config *cfg,
@@ -1200,6 +1438,15 @@ static int vd56g3_enum_mbus_code(struct v4l2_subdev *sd,
 	return 0;
 }
 
+/**
+ * vd56g3_get_fmt - Callback to get the frame format of specific subdev pads
+ * @sd: v4l2 subdevice entry point
+ * @cfg: struct used for storing subdev pad information
+ * @format: the v4l2_subdev_format struct for which format field will be filled by the driver
+ *
+ * This callback enables to retrieve the frame format.
+ * It will be triggered upon the VIDIOC_SUBDEV_G_FMT() ioctl call.
+ */
 static int vd56g3_get_fmt(struct v4l2_subdev *sd,
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 			  struct v4l2_subdev_pad_config *cfg,
@@ -1235,6 +1482,15 @@ static int vd56g3_get_fmt(struct v4l2_subdev *sd,
 	return 0;
 }
 
+/**
+ * vd56g3_set_fmt - Callback to set a given frame format
+ * @sd: v4l2 subdevice entry point
+ * @cfg: struct used for storing subdev pad information
+ * @format: the format to set
+ *
+ * This callback enables to change the format with the given @format value.
+ * It will be triggered upon the VIDIOC_SUBDEV_S_FMT() ioctl call.
+ */
 static int vd56g3_set_fmt(struct v4l2_subdev *sd,
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 			  struct v4l2_subdev_pad_config *cfg,
@@ -1285,6 +1541,16 @@ out:
 	return ret;
 }
 
+/**
+ * vd56g3_enum_frame_size - Callback to enumerate supported frame sizes
+ * @sd: v4l2 subdevice entry point
+ * @cfg: struct used for storing subdev pad information
+ * @fse: pointer to struct v4l2_subdev_frame_size_enum that the driver will fill with the supported frame size
+ *
+ * This callback enables to enumerate all frame sizes supported by a sub-device
+ * on the given pad for the given media bus format.
+ * It will be triggered upon the VIDIOC_SUBDEV_ENUM_FRAME_SIZE() ioctl call.
+ */
 static int vd56g3_enum_frame_size(struct v4l2_subdev *sd,
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 				  struct v4l2_subdev_pad_config *cfg,
@@ -1310,6 +1576,15 @@ static int vd56g3_enum_frame_size(struct v4l2_subdev *sd,
 	return 0;
 }
 
+/**
+ * vd56g3_enum_frame_interval - Callback to enumerate available frame intervals on a given sub-device pad
+ * @sd: v4l2 subdevice entry point
+ * @cfg: struct used for storing subdev pad information
+ * @fie: pointer to struct v4l2_subdev_frame_interval_enum that the driver will fill with the supported frame intervals
+ *
+ * This callback enables to enumerate available frame intervals on a given sub-device pad.
+ * It will be triggered upon the VIDIOC_SUBDEV_ENUM_FRAME_INTERVAL() ioctl call
+ */
 static int vd56g3_enum_frame_interval(struct v4l2_subdev *sd,
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 				      struct v4l2_subdev_pad_config *cfg,
@@ -1368,7 +1643,68 @@ static const struct media_entity_operations vd56g3_subdev_entity_ops = {
 	.link_validate = v4l2_subdev_link_validate,
 };
 
-/* controls */
+/**
+ * DOC: V4L2 supported Controls
+ *
+ * The vd56g3 driver implements the following list of standard V4L2 controls.
+ *
+ * ================================= ===========================================
+ *  Standard V4L2 Control             Description
+ * ================================= ===========================================
+ *  ``V4L2_CID_PIXEL_RATE``           Pixel rate (mandatory for a `CSI transmitter`_)
+ *  ``V4L2_CID_LINK_FREQ``            Link frequency (mandatory for a `CSI transmitter`_)
+ *  ``V4L2_CID_VFLIP``                Vertical flip (see `V4L2 User Controls`_)
+ *  ``V4L2_CID_HFLIP``                Horizontal flip (see `V4L2 User Controls`_)
+ *  ``V4L2_CID_TEST_PATTERN``         Test pattern generation (see `V4L2 Image Process Controls`_)
+ *  ``V4L2_CID_EXPOSURE_AUTO``        Auto Exposure (see `V4L2 Camera Controls`_)
+ *  ``V4L2_CID_3A_LOCK``              Lock/Unlock auto expo (see `V4L2 Camera Controls`_)
+ *  ``V4L2_CID_AUTO_EXPOSURE_BIAS``   `AE - Exposure compensation`_
+ *  ``V4L2_CID_GAIN``                 Gain setting when auto expo is disabled (see `V4L2 User Controls`_)
+ *  ``V4L2_CID_EXPOSURE``             Exposure setting when auto expo is disabled (see `V4L2 User Controls`_)
+ * ================================= ===========================================
+ *
+ * In addition to standard V4L2 control, the vd56g3 driver also defines specific custom controls.
+ *
+ * ====================================== ======================================
+ *  Custom V4L2 Control                    Description
+ * ====================================== ======================================
+ *  ``V4L2_CID_GPIO0_MODE``	           `GPIO0 mode selection Control`_
+ *  ``V4L2_CID_GPIO1_MODE``                `GPIO1 mode selection Control`_
+ *  ``V4L2_CID_GPIO2_MODE``                `GPIO2 mode selection Control`_
+ *  ``V4L2_CID_GPIO3_MODE``                `GPIO3 mode selection Control`_
+ *  ``V4L2_CID_GPIO4_MODE``                `GPIO4 mode selection Control`_
+ *  ``V4L2_CID_GPIO5_MODE``                `GPIO5 mode selection Control`_
+ *  ``V4L2_CID_GPIO6_MODE``                `GPIO6 mode selection Control`_
+ *  ``V4L2_CID_GPIO7_MODE``                `GPIO7 mode selection Control`_
+ *  ``V4L2_CID_TEMPERATURE``               `Temperature Control`_
+ *  ``V4L2_CID_AE_TARGET_PERCENTAGE``      `AE - Light level target (%)`_
+ *  ``V4L2_CID_AE_CONTROL_MODE``           `AE - Control Mode`_
+ *  ``V4L2_CID_AE_CONTROL_FLICKER_FREQ``   `AE - Flicker Frequency`_
+ *  ``V4L2_CID_AE_STEP_PROPORTION``        `AE - Convergence step proportion (%)`_
+ *  ``V4L2_CID_AE_LEAK_PROPORTION``        `AE - Convergence leak proportion (per mil)`_
+ * ====================================== ======================================
+ *
+ * .. _CSI transmitter: https://www.kernel.org/doc/html/latest/driver-api/media/csi2.html
+ * .. _V4L2 User Controls: https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/control.html?#control-ids
+ * .. _V4L2 Image Process Controls: https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/ext-ctrls-image-process.html?#image-process-control-ids
+ * .. _V4L2 Camera Controls: https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/ext-ctrls-camera.html?#camera-control-ids
+ */
+
+/**
+ * DOC: AE - Exposure compensation
+ *
+ * Determines the automatic exposure compensation (see `V4L2 Camera Controls`_).
+ *
+ * Supported exposure bias values in range -4.0EV .. +4.0EV.
+ *
+ * The control expresses the values as 0.001 EV units, where the value 1000 stands for +1 EV
+ *
+ * :id:         ``V4L2_CID_AUTO_EXPOSURE_BIAS``
+ * :type:       ``V4L2_CTRL_TYPE_INTEGER_MENU``
+ * :qmenu_int:  -4000, -3500, -3000, -2500, -2000, -1500, -1000, -500, 0, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000
+ * :def:        0
+ */
+
 static int vd56g3_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct v4l2_subdev *sd = ctrl_to_sd(ctrl);
@@ -1430,6 +1766,10 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_3A_LOCK:
 		ret = vd56g3_lock_exposure(sensor, ctrl->val);
 		break;
+	case V4L2_CID_AUTO_EXPOSURE_BIAS:
+		ret = vd56g3_write_reg16(sensor, DEVICE_AE_COMPENSATION,
+					 DIV_ROUND_CLOSEST((int) ev_bias_qmenu[ctrl->val] * 256, 1000));
+		break;
 	case V4L2_CID_GPIO0_MODE:
 	case V4L2_CID_GPIO1_MODE:
 	case V4L2_CID_GPIO2_MODE:
@@ -1440,6 +1780,25 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_GPIO7_MODE:
 		ret = vd56g3_update_gpiox_strobe_mode(sensor, ctrl->val,
 			ctrl->id - V4L2_CID_GPIO0_MODE);
+		break;
+	case V4L2_CID_AE_TARGET_PERCENTAGE:
+		ret = vd56g3_write_reg16(sensor, DEVICE_AE_TARGET_PERCENTAGE, ctrl->val);
+		break;
+	case V4L2_CID_AE_CONTROL_MODE:
+		ret = vd56g3_write_reg(sensor, DEVICE_AE_COMPILER_CONTROL,
+				       sensor->ae_flicker_freq_ctrl->val << 1 | ctrl->val);
+		break;
+	case V4L2_CID_AE_CONTROL_FLICKER_FREQ:
+		ret = vd56g3_write_reg(sensor, DEVICE_AE_COMPILER_CONTROL,
+				       ctrl->val << 1 | sensor->ae_ctrl_mode_ctrl->val);
+		break;
+	case V4L2_CID_AE_STEP_PROPORTION:
+		ret = vd56g3_write_reg16(sensor, DEVICE_AE_STEP_PROPORTION,
+					 DIV_ROUND_CLOSEST(ctrl->val * 256, 100));
+		break;
+	case V4L2_CID_AE_LEAK_PROPORTION:
+		ret = vd56g3_write_reg16(sensor, DEVICE_AE_LEAK_PROPORTION,
+					 DIV_ROUND_CLOSEST(ctrl->val * 32768, 1000));
 		break;
 	default:
 		ret = -EINVAL;
@@ -1455,6 +1814,16 @@ static const struct v4l2_ctrl_ops vd56g3_ctrl_ops = {
 };
 
 /* FIXME: better add a macro here ? */
+
+/**
+ * DOC: GPIO0 mode selection Control
+ *
+ * :id:     ``V4L2_CID_GPIO0_MODE``
+ * :type:   ``V4L2_CTRL_TYPE_MENU``
+ * :qmenu:  "disabled", "strobe envelope positive", "strobe envelope negative"
+ * :def:    "disabled"
+ *
+ */
 static const struct v4l2_ctrl_config vd56g3_gpio0_ctrl = {
 	.ops		= &vd56g3_ctrl_ops,
 	.id		= V4L2_CID_GPIO0_MODE,
@@ -1464,6 +1833,15 @@ static const struct v4l2_ctrl_config vd56g3_gpio0_ctrl = {
 	.qmenu		= vd56g3_gpios_modes,
 };
 
+/**
+ * DOC: GPIO1 mode selection Control
+ *
+ * :id:     ``V4L2_CID_GPIO1_MODE``
+ * :type:   ``V4L2_CTRL_TYPE_MENU``
+ * :qmenu:  "disabled", "strobe envelope positive", "strobe envelope negative"
+ * :def:    "disabled"
+ *
+ */
 static const struct v4l2_ctrl_config vd56g3_gpio1_ctrl = {
 	.ops		= &vd56g3_ctrl_ops,
 	.id		= V4L2_CID_GPIO1_MODE,
@@ -1473,6 +1851,15 @@ static const struct v4l2_ctrl_config vd56g3_gpio1_ctrl = {
 	.qmenu		= vd56g3_gpios_modes,
 };
 
+/**
+ * DOC: GPIO2 mode selection Control
+ *
+ * :id:     ``V4L2_CID_GPIO2_MODE``
+ * :type:   ``V4L2_CTRL_TYPE_MENU``
+ * :qmenu:  "disabled", "strobe envelope positive", "strobe envelope negative"
+ * :def:    "disabled"
+ *
+ */
 static const struct v4l2_ctrl_config vd56g3_gpio2_ctrl = {
 	.ops		= &vd56g3_ctrl_ops,
 	.id		= V4L2_CID_GPIO2_MODE,
@@ -1482,6 +1869,15 @@ static const struct v4l2_ctrl_config vd56g3_gpio2_ctrl = {
 	.qmenu		= vd56g3_gpios_modes,
 };
 
+/**
+ * DOC: GPIO3 mode selection Control
+ *
+ * :id:     ``V4L2_CID_GPIO3_MODE``
+ * :type:   ``V4L2_CTRL_TYPE_MENU``
+ * :qmenu:  "disabled", "strobe envelope positive", "strobe envelope negative"
+ * :def:    "disabled"
+ *
+ */
 static const struct v4l2_ctrl_config vd56g3_gpio3_ctrl = {
 	.ops		= &vd56g3_ctrl_ops,
 	.id		= V4L2_CID_GPIO3_MODE,
@@ -1491,6 +1887,15 @@ static const struct v4l2_ctrl_config vd56g3_gpio3_ctrl = {
 	.qmenu		= vd56g3_gpios_modes,
 };
 
+/**
+ * DOC: GPIO4 mode selection Control
+ *
+ * :id:     ``V4L2_CID_GPIO4_MODE``
+ * :type:   ``V4L2_CTRL_TYPE_MENU``
+ * :qmenu:  "disabled", "strobe envelope positive", "strobe envelope negative"
+ * :def:    "disabled"
+ *
+ */
 static const struct v4l2_ctrl_config vd56g3_gpio4_ctrl = {
 	.ops		= &vd56g3_ctrl_ops,
 	.id		= V4L2_CID_GPIO4_MODE,
@@ -1500,6 +1905,15 @@ static const struct v4l2_ctrl_config vd56g3_gpio4_ctrl = {
 	.qmenu		= vd56g3_gpios_modes,
 };
 
+/**
+ * DOC: GPIO5 mode selection Control
+ *
+ * :id:     ``V4L2_CID_GPIO5_MODE``
+ * :type:   ``V4L2_CTRL_TYPE_MENU``
+ * :qmenu:  "disabled", "strobe envelope positive", "strobe envelope negative"
+ * :def:    "disabled"
+ *
+ */
 static const struct v4l2_ctrl_config vd56g3_gpio5_ctrl = {
 	.ops		= &vd56g3_ctrl_ops,
 	.id		= V4L2_CID_GPIO5_MODE,
@@ -1509,6 +1923,15 @@ static const struct v4l2_ctrl_config vd56g3_gpio5_ctrl = {
 	.qmenu		= vd56g3_gpios_modes,
 };
 
+/**
+ * DOC: GPIO6 mode selection Control
+ *
+ * :id:     ``V4L2_CID_GPIO6_MODE``
+ * :type:   ``V4L2_CTRL_TYPE_MENU``
+ * :qmenu:  "disabled", "strobe envelope positive", "strobe envelope negative"
+ * :def:    "disabled"
+ *
+ */
 static const struct v4l2_ctrl_config vd56g3_gpio6_ctrl = {
 	.ops		= &vd56g3_ctrl_ops,
 	.id		= V4L2_CID_GPIO6_MODE,
@@ -1518,6 +1941,15 @@ static const struct v4l2_ctrl_config vd56g3_gpio6_ctrl = {
 	.qmenu		= vd56g3_gpios_modes,
 };
 
+/**
+ * DOC: GPIO7 mode selection Control
+ *
+ * :id:     ``V4L2_CID_GPIO7_MODE``
+ * :type:   ``V4L2_CTRL_TYPE_MENU``
+ * :qmenu:  "disabled", "strobe envelope positive", "strobe envelope negative"
+ * :def:    "disabled"
+ *
+ */
 static const struct v4l2_ctrl_config vd56g3_gpio7_ctrl = {
 	.ops		= &vd56g3_ctrl_ops,
 	.id		= V4L2_CID_GPIO7_MODE,
@@ -1527,6 +1959,14 @@ static const struct v4l2_ctrl_config vd56g3_gpio7_ctrl = {
 	.qmenu		= vd56g3_gpios_modes,
 };
 
+/**
+ * DOC: Temperature Control
+ *
+ * Return sensor temperature (in Celsius)
+ *
+ * :id:     ``V4L2_CID_TEMPERATURE``
+ * :type:   ``V4L2_CTRL_TYPE_INTEGER``
+ */
 static const struct v4l2_ctrl_config vd56g3_temp_ctrl = {
 	.ops		= &vd56g3_ctrl_ops,
 	.id		= V4L2_CID_TEMPERATURE,
@@ -1535,6 +1975,140 @@ static const struct v4l2_ctrl_config vd56g3_temp_ctrl = {
 	.min		= -1024,
 	.max		= 1023,
 	.step		= 1,
+};
+
+/**
+ * DOC: AE - Light level target (%)
+ *
+ * The AE algorithm targets a level of luminance as a percent of the saturation level.
+ *
+ * Lower value means darker image, Higher value means brighter image (100% means saturated image).
+ *
+ * :id:     ``V4L2_CID_AE_TARGET_PERCENTAGE``
+ * :type:   ``V4L2_CTRL_TYPE_INTEGER``
+ * :min:    0
+ * :max:    100
+ * :def:    27
+ */
+static const struct v4l2_ctrl_config vd56g3_ae_target_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_AE_TARGET_PERCENTAGE,
+	.name		= "AE - Light level target (%)",
+	.type		= V4L2_CTRL_TYPE_INTEGER,
+	.min		= 0,
+	.max		= 100,
+	.def		= 27,
+	.step		= 1
+};
+
+/**
+ * DOC: AE - Control Mode
+ *
+ * Two AE modes are available.
+ *
+ *     - priority to minimum gains. The AE algorithm minimizes both digital and analog gains, then adjusts the integration time.
+ *     - priority to flicker free exposure. The AE algorithm prioritizes the integration time in multiples of half the flicker period
+ *
+ * :id:     ``V4L2_CID_AE_CONTROL_MODE``
+ * :type:   ``V4L2_CTRL_TYPE_MENU``
+ * :qmenu:  "Priority to minimum gain", "Priority to flicker free"
+ * :def:    "Priority to minimum gain"
+ */
+static const struct v4l2_ctrl_config vd56g3_ae_ctrl_mode_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_AE_CONTROL_MODE,
+	.name		= "AE - Control Mode",
+	.type		= V4L2_CTRL_TYPE_MENU,
+	.max		= ARRAY_SIZE(vd56g3_ae_mode) - 1,
+	.qmenu		= vd56g3_ae_mode,
+};
+
+/**
+ * DOC: AE - Flicker Frequency
+ *
+ * Two frequencies are available for Flicker free mode (see `AE - Control Mode`_):
+ *
+ *     - 50 Hz, the AE algorithm tries to set the integration time to a multiple of 10 ms
+ *     - 60 Hz, the AE algorithm tries to set the integration time to a multiple of 8.33 ms
+ *
+ * .. note::
+ *     For lower integration times, the flicker free condition is not respected
+ *
+ * :id:     ``V4L2_CID_AE_CONTROL_FLICKER_FREQ``
+ * :type:   ``V4L2_CTRL_TYPE_MENU``
+ * :qmenu:  "50Hz", "60Hz"
+ * :def:    "50Hz"
+ */
+static const struct v4l2_ctrl_config vd56g3_ae_flicker_freq_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_AE_CONTROL_FLICKER_FREQ,
+	.name		= "AE - Flicker Frequency",
+	.type		= V4L2_CTRL_TYPE_MENU,
+	.max		= ARRAY_SIZE(vd56g3_ae_flicker_freq) - 1,
+	.qmenu		= vd56g3_ae_flicker_freq,
+};
+
+/**
+ * DOC: AE - Convergence step proportion (%)
+ *
+ * The AE convergence loop can be fined tuned.
+ *
+ * This parameter controls convergence speed. It is the damping factor for the exposure variation.
+ * The step proportion range is [0.0 .. 1.0] :
+ *
+ *    - 0.0, the exposure is frozen
+ *    - 0.5, operation is at half speed (default)
+ *    - 1.0, operation is at full speed (not recommended)
+ *
+ * The current V4L2 control is expressed in **per cent.**
+ *
+ * :id:     ``V4L2_CID_AE_STEP_PROPORTION``
+ * :type:   ``V4L2_CTRL_TYPE_INTEGER``
+ * :min:    0
+ * :max:    100
+ * :def:    50
+ */
+static const struct v4l2_ctrl_config vd56g3_ae_step_prop_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_AE_STEP_PROPORTION,
+	.name		= "AE - Convg. step prop. (%)",
+	.type		= V4L2_CTRL_TYPE_INTEGER,
+	.min		= 0,
+	.max		= 100,
+	.def		= 50,
+	.step		= 1
+};
+
+/**
+ * DOC: AE - Convergence leak proportion (per mil)
+ *
+ * The AE convergence loop can be fined tuned.
+ *
+ * This parameter controls reactivity.
+ * The convergence algorithm contains a leaky integrator that average the image statistics over time and smoothes the luminance transition.
+ *
+ * The leak proportion range is [0.0 .. 1.0] :
+ *
+ *    - 0.0, statistics are frozen at the previous value
+ *    - 1.0, statistics are forced to the current frame statistic
+ *
+ * The current V4L2 control is expressed in **per mille.**
+ *
+ * :id:     ``V4L2_CID_AE_LEAK_PROPORTION``
+ * :type:   ``V4L2_CTRL_TYPE_INTEGER``
+ * :min:    0
+ * :max:    1000
+ * :def:    50
+ */
+static const struct v4l2_ctrl_config vd56g3_ae_leak_prop_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_AE_LEAK_PROPORTION,
+	.name		= "AE - Convg leak prop. (per mil)",
+	.type		= V4L2_CTRL_TYPE_INTEGER,
+	.min		= 0,
+	.max		= 1000,
+	.def		= 50,
+	.step		= 1
 };
 
 static int vd56g3_init_controls(struct vd56g3_dev *sensor)
@@ -1570,6 +2144,11 @@ static int vd56g3_init_controls(struct vd56g3_dev *sensor)
 	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_EXPOSURE, 1, 500, 1, 10);
 	/* V4L2_CID_3A_LOCK */
 	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_3A_LOCK, 0, 7, 0, 0);
+	/* V4L2_CID_AUTO_EXPOSURE_BIAS */
+	v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_AUTO_EXPOSURE_BIAS,
+			       ARRAY_SIZE(ev_bias_qmenu) - 1,
+			       (ARRAY_SIZE(ev_bias_qmenu) + 1 ) / 2 - 1,
+			       ev_bias_qmenu);
 	/* gpios stuff */
 	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio0_ctrl, NULL);
 	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio1_ctrl, NULL);
@@ -1582,7 +2161,12 @@ static int vd56g3_init_controls(struct vd56g3_dev *sensor)
 	/* temperature */
 	ctrl = v4l2_ctrl_new_custom(hdl, &vd56g3_temp_ctrl, NULL);
 	ctrl->flags |= V4L2_CTRL_FLAG_VOLATILE | V4L2_CTRL_FLAG_READ_ONLY;
-
+	/* AE controls */
+	v4l2_ctrl_new_custom(hdl, &vd56g3_ae_target_ctrl, NULL);
+	sensor->ae_ctrl_mode_ctrl = v4l2_ctrl_new_custom(hdl, &vd56g3_ae_ctrl_mode_ctrl, NULL);
+	sensor->ae_flicker_freq_ctrl = v4l2_ctrl_new_custom(hdl, &vd56g3_ae_flicker_freq_ctrl, NULL);
+	v4l2_ctrl_new_custom(hdl, &vd56g3_ae_step_prop_ctrl, NULL);
+	v4l2_ctrl_new_custom(hdl, &vd56g3_ae_leak_prop_ctrl, NULL);
 	if (hdl->error) {
 		ret = hdl->error;
 		goto free_ctrls;
@@ -1697,6 +2281,12 @@ static int vd56g3_probe(struct i2c_client *client)
 	ret = vd56g3_boot(sensor);
 	if (ret) {
 		dev_err(&client->dev, "sensor boot failed %d", ret);
+		goto disable_clock;
+	}
+
+	ret = vd56g3_vtpatch(sensor);
+	if (ret) {
+		dev_err(&client->dev, "sensor VT patch failed %d", ret);
 		goto disable_clock;
 	}
 

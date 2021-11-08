@@ -1,0 +1,9 @@
+# Automatically normalize line endings (to LF) for all text-based files.
+* text=auto eol=lf
+
+# export-ignore rules (to keep only 'src' folder for release)
+.gitignore export-ignore
+.gitattributes export-ignore
+doc export-ignore
+release export-ignore
+index.md export-ignore
