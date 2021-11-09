@@ -1,3 +1,10 @@
+st-vd56g3-dkms (0.6-1) unstable; urgency=medium
+
+  * New upstream release
+  * Update debian/rules to reflect new repository organization
+
+ -- Sylvain Petinot <sylvain.petinot@st.com>  Mon, 08 Nov 2021 17:30:40 +0100
+
 st-vd56g3-dkms (0.5-1) unstable; urgency=medium
 
   * New upstream release
