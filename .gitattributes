@@ -6,4 +6,4 @@
 .gitattributes export-ignore
 doc export-ignore
 release export-ignore
-index.md export-ignore
+readme.md export-ignore
