@@ -1,5 +1,7 @@
 # Changelog
 
+## [0.8.0] - 2021-11-16
+- Add Changelog
 ## [0.6.0] - 2021-11-16
 - Add Cut2.0 support
 - Enable VTRam Patch for Cut2.0 (VT patch 17)
