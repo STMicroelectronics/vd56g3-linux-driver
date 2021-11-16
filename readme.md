@@ -36,3 +36,15 @@ The proposed Branching Model is a simplified version of [GitFlow](https://datasi
     - Interesting when multiple developpers are contributing on different feature at the same time
     - Used to develop new features requiring significant amount of work (i.e. multiple commits)
     - Depending of the nature of the feature branch, someone may want to keep the historical existence of the branch (use of `--no-ff` argument while merging) or not (default merge behavior).
+
+Release Reminder
+----------------
+
+1. Update Changelog (use git log to get overview of commits since last tag)
+
+    `git log 0.6.0..HEAD --pretty=%s --reverse`
+
+2. Tag 'master' (anotated tag)
+3. Merge branch 'master' to 'debian'
+4. Update debian changelog
+5. Optional - Generate an archive using the `release.sh` script (in 'release' folder)
