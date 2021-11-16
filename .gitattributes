@@ -7,3 +7,4 @@
 doc export-ignore
 release export-ignore
 readme.md export-ignore
+Jenkinsfile export-ignore
