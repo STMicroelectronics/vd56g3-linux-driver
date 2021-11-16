@@ -28,6 +28,10 @@ pipeline {
 			}
 		}
 		stage('Package') {
+			when { anyOf {
+				environment name: 'GIT_BRANCH', value: 'master';
+				environment name: 'GIT_BRANCH', value: 'debian'
+			}}
 			steps {
 				dir('debianizer') {
 					git credentialsId: 'af76724f-9593-4f6c-a5cc-1548eb8b0e14',
@@ -43,6 +47,10 @@ pipeline {
 			}
 		}
 		stage('Upload') {
+			when { anyOf {
+				environment name: 'GIT_BRANCH', value: 'master';
+				environment name: 'GIT_BRANCH', value: 'debian'
+			}}
 			steps {
 				script {
 					if (env.GIT_BRANCH == 'debian') {
