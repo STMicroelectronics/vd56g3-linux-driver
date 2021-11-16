@@ -5,6 +5,9 @@
 sphinx<2
 sphinx_rtd_theme
 
+# Need to pin docutils to avoid TypeError: 'generator' object is not subscriptable. (details : https://github.com/sphinx-doc/sphinx/issues/9788)
+docutils<0.18
+
 # Enable 3rd party sphinx extensions
 git+http://github.com/return42/linuxdoc.git
 
