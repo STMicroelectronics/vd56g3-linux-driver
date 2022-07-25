@@ -58,8 +58,8 @@ pipeline {
 							serverId: 'artifactory-azure',
 							spec: '''{ "files": [ {
 									"pattern": "../st-vd56g3*.deb",
-									"target":
-									"imgswlinux-releases-imgappswlinux-codex-st-com/drivers/st-vd56g3/debian/"
+									"target": "imgswlinux-debian-local/pool/st-vd56g3-dkms/stable/",
+									"props": "deb.distribution=stable;deb.component=main;deb.architecture=armhf;deb.architecture=arm64"
 								} ] }'''
 						)
 					} else {
@@ -67,22 +67,12 @@ pipeline {
 							serverId: 'artifactory-azure',
 							spec: '''{ "files": [ {
 									"pattern": "../st-vd56g3*.deb",
-									"target":
-									"imgswlinux-snapshots-imgappswlinux-codex-st-com/drivers/st-vd56g3/debian/"
+									"target": "imgswlinux-debian-local/pool/st-vd56g3-dkms/unstable/",
+									"props": "deb.distribution=unstable;deb.component=main;deb.architecture=armhf;deb.architecture=arm64"
 								} ] }'''
 						)
 					}
 				}
-			}
-		}
-		stage('Publish') {
-			when { environment name: 'GIT_BRANCH', value: 'debian' }
-			steps {
-
-				// Query our aptly repository to update our package
-				sh "curl -X POST -F file=@\$(realpath ../st-vd56g3*.deb) http://10.129.167.70:8081/api/files/tmp"
-				sh "curl -X POST http://10.129.167.70:8081/api/repos/stimglinux-release/file/tmp/\$(basename ../st-vd56g3*.deb)"
-				sh "curl -X PUT http://10.129.167.70:8081/api/publish/:./buster"
 			}
 		}
 	}
