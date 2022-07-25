@@ -3,8 +3,8 @@ pipeline {
 		label 'os-ubuntu2004'
 	}
 	environment {
-		HTTP_PROXY = credentials('proxy')
-		HTTPS_PROXY = credentials('proxy')
+		http_proxy = credentials('proxy')
+		https_proxy = credentials('proxy')
 	}
 
 	stages {
