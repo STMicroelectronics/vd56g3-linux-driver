@@ -55,20 +55,20 @@ pipeline {
 				script {
 					if (env.GIT_BRANCH == 'debian') {
 						rtUpload (
-							serverId: 'releases-artifactory-citools-st-com',
+							serverId: 'artifactory-azure',
 							spec: '''{ "files": [ {
 									"pattern": "../st-vd56g3*.deb",
 									"target":
-									"imgappswlinux-codex-st-com/drivers/st-vd56g3/debian/"
+									"imgswlinux-releases-imgappswlinux-codex-st-com/drivers/st-vd56g3/debian/"
 								} ] }'''
 						)
 					} else {
 						rtUpload (
-							serverId: 'snapshots-artifactory-citools-st-com',
+							serverId: 'artifactory-azure',
 							spec: '''{ "files": [ {
 									"pattern": "../st-vd56g3*.deb",
 									"target":
-									"snapshots-imgappswlinux-codex-st-com/drivers/st-vd56g3/debian/"
+									"imgswlinux-snapshots-imgappswlinux-codex-st-com/drivers/st-vd56g3/debian/"
 								} ] }'''
 						)
 					}
