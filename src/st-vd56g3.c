@@ -159,7 +159,7 @@ static const s64 link_freq[] = {
 };
 
 /* macro to convert index to 8.8 fixed point gain */
-#define I2FP(i)				(u32)(8192.0 / (32 - (i)))
+#define I2FP(i)				(u32)((32 * 256.0) / (32 - (i)))
 /* array of possibles analog gains in 8.8 fixed point */
 static const u16 analog_gains[29] = {
 	I2FP(0), I2FP(1), I2FP(2), I2FP(3),
