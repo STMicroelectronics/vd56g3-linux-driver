@@ -190,16 +190,52 @@ static const u16 analog_gains[29] = {
 	I2FP(24), I2FP(25), I2FP(26), I2FP(27), I2FP(28)
 };
 
-struct vd56g3_mode_info {
+enum vd56g3_bin_mode {
+	VG56G3_BIN_MODE_NORMAL,
+	VG56G3_BIN_MODE_DIGITAL_X2,
+	VG56G3_BIN_MODE_DIGITAL_X4,
+};
+
+struct vd56g3_mode {
 	u32 width;
 	u32 height;
-	int bin_mode;
+	enum vd56g3_bin_mode bin_mode;
+	struct v4l2_rect crop;
 	int is_isl;
 };
 
-static const u32 vd56g3_supported_codes[] = {
-	MEDIA_BUS_FMT_SGBRG8_1X8,
-	MEDIA_BUS_FMT_SGBRG10_1X10
+struct vd56g3_fmt_desc {
+	u32 code;
+	u8 bpp;
+	u8 data_type;
+};
+
+static const struct vd56g3_fmt_desc vd56g3_supported_codes[] = {
+	{
+		.code = MEDIA_BUS_FMT_Y8_1X8,
+		.bpp = 8,
+		.data_type = MIPI_CSI2_DT_RAW8,
+	},
+	{
+		.code = MEDIA_BUS_FMT_Y10_1X10,
+		.bpp = 10,
+		.data_type = MIPI_CSI2_DT_RAW10,
+	},
+	/*
+	 * The sensor is monochrome, but on some platforms such as the db410c
+	 * the media pipeline does not support Y* formats. Trick it by sending
+	 * it a bayer format instead.
+	 */
+	{
+		.code = MEDIA_BUS_FMT_SGBRG8_1X8,
+		.bpp = 8,
+		.data_type = MIPI_CSI2_DT_RAW8,
+	},
+	{
+		.code = MEDIA_BUS_FMT_SGBRG10_1X10,
+		.bpp = 10,
+		.data_type = MIPI_CSI2_DT_RAW10,
+	},
 };
 
 /**
@@ -230,12 +266,67 @@ static const u32 vd56g3_supported_codes[] = {
 
 const int vd56g3_sensor_frame_rates[] = { 90, 60, 50, 30, 25, 15, 10, 5, 1 };
 
-static const struct vd56g3_mode_info vd56g3_mode_data[] = {
-	{ 1124, 1366, 0, 1 }, { 1124, 1364, 0, 0 }, { 1024, 1282, 0, 1 },
-	{ 1024, 1280, 0, 0 }, { 1024, 1026, 0, 1 }, { 1024, 1024, 0, 0 },
-	{ 720, 1282, 0, 1 },  { 720, 1280, 0, 0 },  { 640, 482, 0, 1 },
-	{ 640, 480, 0, 0 },   { 480, 642, 1, 1 },   { 480, 640, 1, 0 },
-	{ 320, 242, 1, 1 },   { 320, 240, 1, 0 },   { 240, 320, 2, 0 },
+static const struct vd56g3_mode vd56g3_supported_modes[] = {
+	{
+		.width = VD56G3_WIDTH,
+		.height = VD56G3_HEIGHT,
+		.bin_mode = VG56G3_BIN_MODE_NORMAL,
+		.crop = {
+			.left = 0,
+			.top = 0,
+			.width = VD56G3_WIDTH,
+			.height = VD56G3_HEIGHT,
+		},
+		.is_isl = 0,
+	},
+	{
+		.width = 1024,
+		.height = 1280,
+		.bin_mode = VG56G3_BIN_MODE_NORMAL,
+		.crop = {
+			.left = 50,
+			.top = 42,
+			.width = 1024,
+			.height = 1280,
+		},
+		.is_isl = 0,
+	},
+	{
+		.width = 720,
+		.height = 1280,
+		.bin_mode = VG56G3_BIN_MODE_NORMAL,
+		.crop = {
+			.left = 202,
+			.top = 42,
+			.width = 720,
+			.height = 1280,
+		},
+		.is_isl = 0,
+	},
+	{
+		.width = 480,
+		.height = 640,
+		.bin_mode = VG56G3_BIN_MODE_DIGITAL_X2,
+		.crop = {
+			.left = 82,
+			.top = 42,
+			.width = 960,
+			.height = 1280,
+		},
+		.is_isl = 0,
+	},
+	{
+		.width = 240,
+		.height = 320,
+		.bin_mode = VG56G3_BIN_MODE_DIGITAL_X4,
+		.crop = {
+			.left = 82,
+			.top = 42,
+			.width = 960,
+			.height = 1280,
+		},
+		.is_isl = 0,
+	},
 };
 
 enum vd56g3_expo_state {
@@ -264,7 +355,7 @@ struct vd56g3_dev {
 	struct v4l2_ctrl *ae_flicker_freq_ctrl;
 	bool streaming;
 	struct v4l2_mbus_framefmt fmt;
-	const struct vd56g3_mode_info *current_mode;
+	const struct vd56g3_mode *current_mode;
 	struct v4l2_fract frame_interval;
 	bool hflip;
 	bool vflip;
@@ -287,30 +378,28 @@ static inline struct v4l2_subdev *ctrl_to_sd(struct v4l2_ctrl *ctrl)
 
 static u8 get_bpp_by_code(__u32 code)
 {
-	switch (code) {
-	case MEDIA_BUS_FMT_SGBRG8_1X8:
-		return 8;
-	case MEDIA_BUS_FMT_SGBRG10_1X10:
-		return 10;
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(vd56g3_supported_codes); i++) {
+		if (vd56g3_supported_codes[i].code == code)
+			return vd56g3_supported_codes[i].bpp;
 	}
-
+	/* Should never happen */
 	WARN(1, "Unsupported code %d. default to 8 bpp", code);
-
 	return 8;
 }
 
 static u8 get_datatype_by_code(__u32 code)
 {
-	switch (code) {
-	case MEDIA_BUS_FMT_SGBRG8_1X8:
-		return 0x2a;
-	case MEDIA_BUS_FMT_SGBRG10_1X10:
-		return 0x2b;
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(vd56g3_supported_codes); i++) {
+		if (vd56g3_supported_codes[i].code == code)
+			return vd56g3_supported_codes[i].data_type;
 	}
-
-	WARN(1, "Unsupported code %d. default to 0x2a data type", code);
-
-	return 0x2a;
+	/* Should never happen */
+	WARN(1, "Unsupported code %d. default to MIPI_CSI2_DT_RAW8", code);
+	return MIPI_CSI2_DT_RAW8;
 }
 
 static void compute_pll_parameters_by_freq(u32 freq, unsigned int *prediv,
@@ -325,16 +414,16 @@ static void compute_pll_parameters_by_freq(u32 freq, unsigned int *prediv,
 	 */
 	for (i = 0; i < ARRAY_SIZE(predivs); i++) {
 		*prediv = predivs[i];
-		if (freq / *prediv < 12000000)
+		if (freq / *prediv < 12 * HZ_PER_MHZ)
 			break;
 	}
-	BUG_ON(i == ARRAY_SIZE(predivs));
+	WARN_ON(i == ARRAY_SIZE(predivs));
 
 	/*
 	 * target freq is 804Mhz. Don't change this as it will impact image
 	 * quality.
 	 */
-	*mult = (804000000U * (*prediv) + freq / 2) / freq;
+	*mult = ((804 * HZ_PER_MHZ) * (*prediv) + freq / 2) / freq;
 }
 
 static s32 get_pixel_rate(struct vd56g3_dev *sensor)
@@ -738,35 +827,38 @@ static int vd56g3_detect(struct vd56g3_dev *sensor)
 
 static int vd56g3_try_fmt_internal(struct v4l2_subdev *sd,
 				   struct v4l2_mbus_framefmt *fmt,
-				   const struct vd56g3_mode_info **new_mode)
+				   const struct vd56g3_mode **new_mode)
 {
-	const struct vd56g3_mode_info *mode = vd56g3_mode_data;
+	const struct vd56g3_mode *mode = vd56g3_supported_modes;
 	unsigned int index;
 	unsigned int i;
 
 	/* select code */
 	for (index = 0; index < ARRAY_SIZE(vd56g3_supported_codes); index++) {
-		if (vd56g3_supported_codes[index] == fmt->code)
+		if (vd56g3_supported_codes[index].code == fmt->code)
 			break;
 	}
 	if (index == ARRAY_SIZE(vd56g3_supported_codes))
 		index = 0;
 
 	/* select size */
-	for (i = 0; i < ARRAY_SIZE(vd56g3_mode_data); i++) {
+	for (i = 0; i < ARRAY_SIZE(vd56g3_supported_modes); i++) {
 		if (mode->width <= fmt->width && mode->height <= fmt->height)
 			break;
 		mode++;
 	}
-	if (i == ARRAY_SIZE(vd56g3_mode_data))
+	if (i == ARRAY_SIZE(vd56g3_supported_modes))
 		mode--;
 
 	*new_mode = mode;
-	fmt->code = vd56g3_supported_codes[index];
+	fmt->code = vd56g3_supported_codes[index].code;
 	fmt->width = mode->width;
 	fmt->height = mode->height;
-	fmt->colorspace = V4L2_COLORSPACE_SRGB;
+	fmt->colorspace = V4L2_COLORSPACE_RAW;
 	fmt->field = V4L2_FIELD_NONE;
+	fmt->ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
+	fmt->quantization = V4L2_QUANTIZATION_DEFAULT;
+	fmt->xfer_func = V4L2_XFER_FUNC_DEFAULT;
 
 	return 0;
 }
@@ -784,16 +876,9 @@ static int set_frame_rate(struct vd56g3_dev *sensor)
 
 static int vd56g3_stream_enable(struct vd56g3_dev *sensor)
 {
-	int center_x = VD56G3_WIDTH / 2;
-	int center_y = VD56G3_HEIGHT / 2;
+	const struct v4l2_rect *crop = &sensor->current_mode->crop;
 	int is_isl = sensor->current_mode->is_isl;
-	int scale = 1 << sensor->current_mode->bin_mode;
-	int width = sensor->current_mode->width * scale;
-	int height = sensor->current_mode->height * scale;
 	int ret = 0;
-
-	if (is_isl)
-		height -= 2 * scale;
 
 	/* configure output mode */
 	vd56g3_write_reg(sensor, VD56G3_REG_FORMAT_CTRL,
@@ -813,14 +898,12 @@ static int vd56g3_stream_enable(struct vd56g3_dev *sensor)
 		vd56g3_write_reg(sensor, VD56G3_REG_READOUT_CTRL_CUT1,
 				 sensor->current_mode->bin_mode, &ret);
 	}
-	vd56g3_write_reg(sensor, VD56G3_REG_OUT_ROI_X_START,
-			 center_x - width / 2, &ret);
+	vd56g3_write_reg(sensor, VD56G3_REG_OUT_ROI_X_START, crop->left, &ret);
 	vd56g3_write_reg(sensor, VD56G3_REG_OUT_ROI_X_END,
-			 center_x + width / 2 - 1, &ret);
-	vd56g3_write_reg(sensor, VD56G3_REG_OUT_ROI_Y_START,
-			 center_y - height / 2, &ret);
+			 crop->left + crop->width - 1, &ret);
+	vd56g3_write_reg(sensor, VD56G3_REG_OUT_ROI_Y_START, crop->top, &ret);
 	vd56g3_write_reg(sensor, VD56G3_REG_OUT_ROI_Y_END,
-			 center_y + height / 2 - 1, &ret);
+			 crop->top + crop->height - 1, &ret);
 	if (ret)
 		return ret;
 
@@ -1321,7 +1404,7 @@ static int vd56g3_enum_mbus_code(struct v4l2_subdev *sd,
 	if (code->index >= ARRAY_SIZE(vd56g3_supported_codes))
 		return -EINVAL;
 
-	code->code = vd56g3_supported_codes[code->index];
+	code->code = vd56g3_supported_codes[code->index].code;
 
 	return 0;
 }
@@ -1390,7 +1473,7 @@ static int vd56g3_set_fmt(struct v4l2_subdev *sd,
 {
 	struct vd56g3_dev *sensor = to_vd56g3_dev(sd);
 	struct i2c_client *client = sensor->i2c_client;
-	const struct vd56g3_mode_info *new_mode;
+	const struct vd56g3_mode *new_mode;
 	struct v4l2_mbus_framefmt *fmt;
 	int ret;
 
@@ -1430,6 +1513,65 @@ out:
 	return ret;
 }
 
+static int vd56g3_init_cfg(struct v4l2_subdev *sd,
+#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+			   struct v4l2_subdev_pad_config *cfg)
+#else
+			   struct v4l2_subdev_state *sd_state)
+#endif
+{
+	struct vd56g3_dev *sensor = to_vd56g3_dev(sd);
+	struct v4l2_subdev_format fmt = { 0 };
+
+	// Default to native resolution mode
+	sensor->current_mode = &vd56g3_supported_modes[0];
+
+#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+	fmt.which = cfg ? V4L2_SUBDEV_FORMAT_TRY : V4L2_SUBDEV_FORMAT_ACTIVE;
+#else
+	fmt.which = sd_state ? V4L2_SUBDEV_FORMAT_TRY :
+				     V4L2_SUBDEV_FORMAT_ACTIVE;
+#endif
+
+	fmt.format.width = sensor->current_mode->width;
+	fmt.format.height = sensor->current_mode->height;
+
+#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+	return vd56g3_set_fmt(sd, cfg, &fmt);
+#else
+	return vd56g3_set_fmt(sd, sd_state, &fmt);
+#endif
+}
+
+static int vd56g3_get_selection(struct v4l2_subdev *sd,
+#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+				struct v4l2_subdev_pad_config *cfg,
+#else
+				struct v4l2_subdev_state *sd_state,
+#endif
+				struct v4l2_subdev_selection *sel)
+{
+	struct vd56g3_dev *sensor = to_vd56g3_dev(sd);
+
+	switch (sel->target) {
+	case V4L2_SEL_TGT_CROP:
+		sel->r = sensor->current_mode->crop;
+		break;
+	case V4L2_SEL_TGT_NATIVE_SIZE:
+	case V4L2_SEL_TGT_CROP_DEFAULT:
+	case V4L2_SEL_TGT_CROP_BOUNDS:
+		sel->r.top = 0;
+		sel->r.left = 0;
+		sel->r.width = VD56G3_WIDTH;
+		sel->r.height = VD56G3_HEIGHT;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 /**
  * vd56g3_enum_frame_size - Callback to enumerate supported frame sizes
  * @sd: v4l2 subdevice entry point
@@ -1455,12 +1597,12 @@ static int vd56g3_enum_frame_size(struct v4l2_subdev *sd,
 	dev_dbg(&client->dev, "%s for index %d", __func__, fse->index);
 	if (fse->pad != 0)
 		return -EINVAL;
-	if (fse->index >= ARRAY_SIZE(vd56g3_mode_data))
+	if (fse->index >= ARRAY_SIZE(vd56g3_supported_modes))
 		return -EINVAL;
 
-	fse->min_width = vd56g3_mode_data[fse->index].width;
+	fse->min_width = vd56g3_supported_modes[fse->index].width;
 	fse->max_width = fse->min_width;
-	fse->min_height = vd56g3_mode_data[fse->index].height;
+	fse->min_height = vd56g3_supported_modes[fse->index].height;
 	fse->max_height = fse->min_height;
 
 	return 0;
@@ -1487,7 +1629,7 @@ vd56g3_enum_frame_interval(struct v4l2_subdev *sd,
 #endif
 			   struct v4l2_subdev_frame_interval_enum *fie)
 {
-	const struct vd56g3_mode_info *mode = vd56g3_mode_data;
+	const struct vd56g3_mode *mode = vd56g3_supported_modes;
 	unsigned int i;
 
 	if (fie->pad != 0)
@@ -1495,12 +1637,12 @@ vd56g3_enum_frame_interval(struct v4l2_subdev *sd,
 	if (fie->index >= ARRAY_SIZE(vd56g3_sensor_frame_rates))
 		return -EINVAL;
 
-	for (i = 0; i < ARRAY_SIZE(vd56g3_mode_data); i++) {
+	for (i = 0; i < ARRAY_SIZE(vd56g3_supported_modes); i++) {
 		if (mode->width <= fie->width && mode->height <= fie->height)
 			break;
 		mode++;
 	}
-	if (i == ARRAY_SIZE(vd56g3_mode_data))
+	if (i == ARRAY_SIZE(vd56g3_supported_modes))
 		return -EINVAL;
 
 	fie->interval.numerator = 1;
@@ -1521,6 +1663,8 @@ static const struct v4l2_subdev_pad_ops vd56g3_pad_ops = {
 	.enum_mbus_code = vd56g3_enum_mbus_code,
 	.get_fmt = vd56g3_get_fmt,
 	.set_fmt = vd56g3_set_fmt,
+	.init_cfg = vd56g3_init_cfg,
+	.get_selection = vd56g3_get_selection,
 	.enum_frame_size = vd56g3_enum_frame_size,
 	.enum_frame_interval = vd56g3_enum_frame_interval,
 };
@@ -2100,11 +2244,8 @@ static int vd56g3_probe(struct i2c_client *client)
 
 	sensor->i2c_client = client;
 	sensor->streaming = false;
-	sensor->fmt.code = MEDIA_BUS_FMT_SGBRG8_1X8;
-	sensor->fmt.field = V4L2_FIELD_NONE;
-	sensor->fmt.colorspace = V4L2_COLORSPACE_SRGB;
 	sensor->frame_interval.numerator = 1;
-	sensor->frame_interval.denominator = 15;
+	sensor->frame_interval.denominator = 30;
 	sensor->manual_expo_us = 10000;
 	sensor->expo_state = VD56G3_EXPO_AUTO;
 
@@ -2206,6 +2347,12 @@ static int vd56g3_probe(struct i2c_client *client)
 	ret = vd56g3_configure(sensor);
 	if (ret) {
 		dev_err(&client->dev, "sensor configuration failed %d", ret);
+		goto disable_clock;
+	}
+
+	ret = vd56g3_init_cfg(&sensor->sd, NULL);
+	if (ret) {
+		dev_err(&client->dev, "Init config failed %d", ret);
 		goto disable_clock;
 	}
 
