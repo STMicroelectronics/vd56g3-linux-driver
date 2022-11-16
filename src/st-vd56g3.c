@@ -251,7 +251,7 @@ struct vd56g3_dev {
 	struct v4l2_fract frame_interval;
 	bool hflip;
 	bool vflip;
-	int manual_expo_ms;
+	int manual_expo_us;
 	enum vd56g3_expo_state expo_state;
 	/* TODO: remove later */
 	bool is_cut2;
@@ -528,13 +528,13 @@ static int vd56g3_get_regulators(struct vd56g3_dev *sensor)
 }
 
 static bool is_expo_valid(struct vd56g3_dev *sensor, int frame_length,
-			  int line_n, int *expo_ms)
+			  int line_n, int *expo_us)
 {
 	/* FIXME : formulae need to be updated */
 	if (line_n < frame_length - 100)
 		return true;
 
-	*expo_ms = *expo_ms - 1;
+	*expo_us = *expo_us - 1;
 
 	return false;
 }
@@ -546,9 +546,9 @@ static int apply_exposure(struct vd56g3_dev *sensor)
 	int line_duration_ns;
 	int expo_line_nb;
 	int ret;
-	int expo_ms = sensor->manual_expo_ms;
+	int expo_us = sensor->manual_expo_us;
 
-	dev_dbg(&client->dev, "%s request expo %d ms", __func__, expo_ms);
+	dev_dbg(&client->dev, "%s request expo %d us", __func__, expo_us);
 	ret = vd56g3_read_reg16(sensor, DEVICE_FRAME_LENGTH, &frame_length);
 	if (ret)
 		return ret;
@@ -556,18 +556,18 @@ static int apply_exposure(struct vd56g3_dev *sensor)
 				     sensor->pclk);
 
 	do {
-		expo_line_nb = (expo_ms * 1000000 + line_duration_ns / 2) /
+		expo_line_nb = (expo_us * 1000 + line_duration_ns / 2) /
 				    line_duration_ns;
 		expo_line_nb = max(1, expo_line_nb);
-	} while (!is_expo_valid(sensor, frame_length, expo_line_nb, &expo_ms));
+	} while (!is_expo_valid(sensor, frame_length, expo_line_nb, &expo_us));
 
 	ret = vd56g3_write_reg16(sensor, DEVICE_MANUAL_COARSE_EXPOSURE,
 				 expo_line_nb);
 	if (ret)
 		return ret;
 
-	dev_dbg(&client->dev, "%s applied expo %d ms", __func__, expo_ms);
-	sensor->manual_expo_ms = expo_ms;
+	dev_dbg(&client->dev, "%s applied expo %d us", __func__, expo_us);
+	sensor->manual_expo_us = expo_us;
 
 	return 0;
 }
@@ -709,9 +709,9 @@ static int vd56g3_update_gains(struct vd56g3_dev *sensor, u32 target)
 	return 0;
 }
 
-static int vd56g3_set_exposure(struct vd56g3_dev *sensor, int expo_ms)
+static int vd56g3_set_exposure(struct vd56g3_dev *sensor, int expo_us)
 {
-	sensor->manual_expo_ms = expo_ms;
+	sensor->manual_expo_us = expo_us;
 	if (sensor->streaming)
 		return apply_exposure(sensor);
 
@@ -1761,7 +1761,7 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	case V4L2_CID_EXPOSURE:
 		ret = vd56g3_set_exposure(sensor, ctrl->val);
-		ctrl->val = sensor->manual_expo_ms;
+		ctrl->val = sensor->manual_expo_us;
 		break;
 	case V4L2_CID_3A_LOCK:
 		ret = vd56g3_lock_exposure(sensor, ctrl->val);
@@ -2198,7 +2198,7 @@ static int vd56g3_probe(struct i2c_client *client)
 	sensor->fmt.colorspace = V4L2_COLORSPACE_SRGB;
 	sensor->frame_interval.numerator = 1;
 	sensor->frame_interval.denominator = 15;
-	sensor->manual_expo_ms = 10;
+	sensor->manual_expo_us = 10000;
 	sensor->expo_state = VD56G3_EXPO_AUTO;
 
 	endpoint = fwnode_graph_get_next_endpoint(
