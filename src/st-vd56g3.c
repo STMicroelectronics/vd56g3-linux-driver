@@ -179,17 +179,6 @@ static const s64 link_freq[] = {
 	402000000ULL
 };
 
-/* macro to convert index to 8.8 fixed point gain */
-#define I2FP(i)				((u32)((32 * 256.0) / (32 - (i))))
-/* array of possibles analog gains in 8.8 fixed point */
-static const u16 analog_gains[29] = {
-	I2FP(0),  I2FP(1),  I2FP(2),  I2FP(3),	I2FP(4),  I2FP(5),
-	I2FP(6),  I2FP(7),  I2FP(8),  I2FP(9),	I2FP(10), I2FP(11),
-	I2FP(12), I2FP(13), I2FP(14), I2FP(15), I2FP(16), I2FP(17),
-	I2FP(18), I2FP(19), I2FP(20), I2FP(21), I2FP(22), I2FP(23),
-	I2FP(24), I2FP(25), I2FP(26), I2FP(27), I2FP(28)
-};
-
 enum vd56g3_bin_mode {
 	VG56G3_BIN_MODE_NORMAL,
 	VG56G3_BIN_MODE_DIGITAL_X2,
@@ -361,6 +350,8 @@ struct vd56g3_dev {
 	bool vflip;
 	int manual_expo_us;
 	enum vd56g3_expo_state expo_state;
+	u8 analog_gain;
+	u16 digital_gain;
 	/* TODO: remove later */
 	bool is_cut2;
 };
@@ -736,37 +727,24 @@ static int vd56g3_get_temp(struct vd56g3_dev *sensor, int *temp)
 		return vd56g3_get_temp_stream_disable(sensor, temp);
 }
 
-static int vd56g3_update_gains(struct vd56g3_dev *sensor, u32 target)
+static int vd56g3_update_analog_gain(struct vd56g3_dev *sensor, u32 target)
 {
-	struct i2c_client *client = sensor->i2c_client;
-	unsigned int idx;
-	u16 digital_gain;
-	int ret = 0;
+	sensor->analog_gain = target;
+	if (sensor->streaming)
+		return vd56g3_write_reg(sensor, VD56G3_REG_MANUAL_ANALOG_GAIN,
+					target, NULL);
 
-	/* find smallest analog gains which is above or equal to target gain */
-	for (idx = 0; idx < ARRAY_SIZE(analog_gains); idx++) {
-		if (analog_gains[idx] >= target)
-			break;
-	}
-	if (idx == ARRAY_SIZE(analog_gains))
-		idx--;
+	return 0;
+}
 
-	/* adjust gigital gain to match target gain */
-	digital_gain =
-		(target * 256 + analog_gains[idx] / 2) / analog_gains[idx];
+static int vd56g3_update_digital_gain(struct vd56g3_dev *sensor, u32 target)
+{
+	sensor->digital_gain = target;
+	if (sensor->streaming)
+		return vd56g3_write_reg(sensor, VD56G3_REG_MANUAL_DIGITAL_GAIN,
+					target, NULL);
 
-	/* applied gains */
-	vd56g3_write_reg(sensor, VD56G3_REG_MANUAL_ANALOG_GAIN, idx, &ret);
-	vd56g3_write_reg(sensor, VD56G3_REG_MANUAL_DIGITAL_GAIN, digital_gain,
-			 &ret);
-
-	dev_dbg(&client->dev, "Target gain  is 0x%04x", target);
-	dev_dbg(&client->dev, "      analog is 0x%04x", analog_gains[idx]);
-	dev_dbg(&client->dev, "     digital is 0x%04x", digital_gain);
-	dev_dbg(&client->dev, "Applied gain is 0x%04x",
-		(analog_gains[idx] * digital_gain) / 256);
-
-	return ret;
+	return 0;
 }
 
 static int vd56g3_set_exposure(struct vd56g3_dev *sensor, int expo_us)
@@ -914,6 +892,16 @@ static int vd56g3_stream_enable(struct vd56g3_dev *sensor)
 
 	/* apply exposure */
 	ret = apply_exposure(sensor);
+	if (ret)
+		return ret;
+
+	/* apply gains */
+	ret = vd56g3_write_reg(sensor, VD56G3_REG_MANUAL_ANALOG_GAIN,
+			       sensor->analog_gain, NULL);
+	if (ret)
+		return ret;
+	ret = vd56g3_write_reg(sensor, VD56G3_REG_MANUAL_DIGITAL_GAIN,
+			       sensor->digital_gain, NULL);
 	if (ret)
 		return ret;
 
@@ -1793,8 +1781,11 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_EXPOSURE_AUTO:
 		ret = vd56g3_update_exposure_auto(sensor, ctrl->val);
 		break;
-	case V4L2_CID_GAIN:
-		ret = vd56g3_update_gains(sensor, ctrl->val);
+	case V4L2_CID_ANALOGUE_GAIN:
+		ret = vd56g3_update_analog_gain(sensor, ctrl->val);
+		break;
+	case V4L2_CID_DIGITAL_GAIN:
+		ret = vd56g3_update_digital_gain(sensor, ctrl->val);
 		break;
 	case V4L2_CID_EXPOSURE:
 		ret = vd56g3_set_exposure(sensor, ctrl->val);
@@ -2187,8 +2178,12 @@ static int vd56g3_init_controls(struct vd56g3_dev *sensor)
 	/* add V4L2_CID_EXPOSURE_AUTO */
 	v4l2_ctrl_new_std_menu(hdl, ops, V4L2_CID_EXPOSURE_AUTO, 1, ~0x3,
 			       V4L2_EXPOSURE_AUTO);
-	/* V4L2_CID_GAIN. This is 8.8 fixed point value */
-	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_GAIN, 0, 0x3fff, 1, 0x100);
+	/* V4L2_CID_ANALOGUE_GAIN */
+	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_ANALOGUE_GAIN, 0, 24, 1,
+			  sensor->analog_gain);
+	/* V4L2_CID_DIGITAL_GAIN (TODO: define proper bounds with appli team)*/
+	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_DIGITAL_GAIN, 0, 0xfff, 1,
+			  sensor->digital_gain);
 	/* V4L2_CID_EXPOSURE */
 	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_EXPOSURE, 1, 500, 1, 10);
 	/* V4L2_CID_3A_LOCK */
@@ -2248,6 +2243,8 @@ static int vd56g3_probe(struct i2c_client *client)
 	sensor->frame_interval.denominator = 30;
 	sensor->manual_expo_us = 10000;
 	sensor->expo_state = VD56G3_EXPO_AUTO;
+	sensor->analog_gain = 0;
+	sensor->digital_gain = 0x100;
 
 #if KERNEL_VERSION(5, 2, 0) >= LINUX_VERSION_CODE
 	handle = fwnode_graph_get_next_endpoint(of_fwnode_handle(dev->of_node),
@@ -2415,5 +2412,5 @@ module_i2c_driver(vd56g3_i2c_driver);
 
 MODULE_AUTHOR("Mickael Guene <mickael.guene@st.com>");
 MODULE_AUTHOR("Sylvain Petinot <sylvain.petinot@foss.st.com>");
-MODULE_DESCRIPTION("VD556G3 camera subdev driver");
+MODULE_DESCRIPTION("VD56G3 camera subdev driver");
 MODULE_LICENSE("GPL");
