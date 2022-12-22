@@ -108,8 +108,8 @@
 #define VD56G3_REG_READOUT_CTRL_CUT1			VD56G3_REG_8BIT(0x048e)
 #define VD56G3_REG_EXP_COARSE_INTG_MARGIN		VD56G3_REG_16BIT(0x0946)
 
-#define VD56G3_WIDTH					1124
-#define VD56G3_HEIGHT					1364
+#define VD56G3_MAX_WIDTH				1120
+#define VD56G3_MAX_HEIGHT				1364
 #define VD56G3_WRITE_MULTIPLE_CHUNK_MAX			16
 
 /* parse-SNIP: Custom-CIDs*/
@@ -230,14 +230,15 @@ static const struct vd56g3_fmt_desc vd56g3_supported_codes[] = {
 /**
  * DOC: Supported Modes
  *
- * The vd56g3 driver supports 8 modes described in the next table :
+ * The vd56g3 driver supports 9 modes described in the next table :
  *
  * ======= ======== ============
  *  Width   Height   Binning
  * ======= ======== ============
- *   1124     1364   No Binning
+ *   1120     1364   No Binning
  *   1024     1280   No Binning
- *   1024     1024   No Binning
+ *   1024      768   No Binning
+ *    768     1024   No Binning
  *    720     1280   No Binning
  *    640      480   No Binning
  *    480      640   Binning x2
@@ -257,14 +258,14 @@ const int vd56g3_sensor_frame_rates[] = { 90, 60, 50, 30, 25, 15, 10, 5, 1 };
 
 static const struct vd56g3_mode vd56g3_supported_modes[] = {
 	{
-		.width = VD56G3_WIDTH,
-		.height = VD56G3_HEIGHT,
+		.width = VD56G3_MAX_WIDTH,
+		.height = VD56G3_MAX_HEIGHT,
 		.bin_mode = VG56G3_BIN_MODE_NORMAL,
 		.crop = {
-			.left = 0,
+			.left = 2,
 			.top = 0,
-			.width = VD56G3_WIDTH,
-			.height = VD56G3_HEIGHT,
+			.width = VD56G3_MAX_WIDTH,
+			.height = VD56G3_MAX_HEIGHT,
 		},
 		.is_isl = 0,
 	},
@@ -281,6 +282,30 @@ static const struct vd56g3_mode vd56g3_supported_modes[] = {
 		.is_isl = 0,
 	},
 	{
+		.width = 1024,
+		.height = 768,
+		.bin_mode = VG56G3_BIN_MODE_NORMAL,
+		.crop = {
+			.left = 50,
+			.top = 298,
+			.width = 1024,
+			.height = 768,
+		},
+		.is_isl = 0,
+	},
+	{
+		.width = 768,
+		.height = 1024,
+		.bin_mode = VG56G3_BIN_MODE_NORMAL,
+		.crop = {
+			.left = 178,
+			.top = 170,
+			.width = 768,
+			.height = 1024,
+		},
+		.is_isl = 0,
+	},
+	{
 		.width = 720,
 		.height = 1280,
 		.bin_mode = VG56G3_BIN_MODE_NORMAL,
@@ -293,6 +318,18 @@ static const struct vd56g3_mode vd56g3_supported_modes[] = {
 		.is_isl = 0,
 	},
 	{
+		.width = 640,
+		.height = 480,
+		.bin_mode = VG56G3_BIN_MODE_NORMAL,
+		.crop = {
+			.left = 242,
+			.top = 442,
+			.width = 640,
+			.height = 480,
+		},
+		.is_isl = 0,
+	},
+	{
 		.width = 480,
 		.height = 640,
 		.bin_mode = VG56G3_BIN_MODE_DIGITAL_X2,
@@ -301,6 +338,18 @@ static const struct vd56g3_mode vd56g3_supported_modes[] = {
 			.top = 42,
 			.width = 960,
 			.height = 1280,
+		},
+		.is_isl = 0,
+	},
+	{
+		.width = 320,
+		.height = 240,
+		.bin_mode = VG56G3_BIN_MODE_DIGITAL_X2,
+		.crop = {
+			.left = 242,
+			.top = 442,
+			.width = 640,
+			.height = 480,
 		},
 		.is_isl = 0,
 	},
@@ -1550,8 +1599,8 @@ static int vd56g3_get_selection(struct v4l2_subdev *sd,
 	case V4L2_SEL_TGT_CROP_BOUNDS:
 		sel->r.top = 0;
 		sel->r.left = 0;
-		sel->r.width = VD56G3_WIDTH;
-		sel->r.height = VD56G3_HEIGHT;
+		sel->r.width = VD56G3_MAX_WIDTH;
+		sel->r.height = VD56G3_MAX_HEIGHT;
 		break;
 	default:
 		return -EINVAL;
