@@ -110,7 +110,11 @@
 
 #define VD56G3_MAX_WIDTH				1120
 #define VD56G3_MAX_HEIGHT				1364
-#define VD56G3_WRITE_MULTIPLE_CHUNK_MAX			16
+#define VD56G3_FRAME_LENGTH_MIN				(VD56G3_MAX_HEIGHT + 69)	// Min Frame Length, Min Vblank, highest FPS
+#define VD56G3_FRAME_LENGTH_DEF_60FPS			2168				// (1/60)/(line_lenght/pixel_clk) // TODO : check line_length and pixel_clk at runtime
+#define VD56G3_EXPOSURE_OFFSET				(68 + 7)			// EXP_COARSE_INTG_MARGIN + 7
+#define VD56G3_EXPOSURE_DEFAULT				200				// TODO : validate value with App Team
+#define VD56G3_WRITE_MULTIPLE_CHUNK_MAX			16				// TODO : unecessary
 
 /* parse-SNIP: Custom-CIDs*/
 #define V4L2_CID_GPIO0_MODE			(V4L2_CID_USER_BASE | 0x1010)
@@ -216,11 +220,13 @@ static const struct vd56g3_fmt_desc vd56g3_supported_codes[] = {
 	 * it a bayer format instead.
 	 */
 	{
+		// TODO : Switch to MEDIA_BUS_FMT_SGRBG8_1X8 while enabling RGB support
 		.code = MEDIA_BUS_FMT_SGBRG8_1X8,
 		.bpp = 8,
 		.data_type = MIPI_CSI2_DT_RAW8,
 	},
 	{
+		// TODO : Switch to MEDIA_BUS_FMT_SGRBG10_1X10 while enabling RGB support
 		.code = MEDIA_BUS_FMT_SGBRG10_1X10,
 		.bpp = 10,
 		.data_type = MIPI_CSI2_DT_RAW10,
@@ -246,15 +252,10 @@ static const struct vd56g3_fmt_desc vd56g3_supported_codes[] = {
  *    240      320   Binning x4
  * ======= ======== ============
  *
- * For each mode, 9 framerates are supported : 90, 60, 50, 30, 25, 15, 10, 5 and
- * 1 FPS.
- *
- * The selection of the desired resolution / framerate is done through standard
+ * The selection of the desired resolution is done through standard
  * V4L2 API. VD56G3 driver implements common camera-type operations (see below
  * the list of supported V4L2 operations).
  */
-
-const int vd56g3_sensor_frame_rates[] = { 90, 60, 50, 30, 25, 15, 10, 5, 1 };
 
 static const struct vd56g3_mode vd56g3_supported_modes[] = {
 	{
@@ -391,16 +392,21 @@ struct vd56g3_dev {
 	struct v4l2_ctrl_handler ctrl_handler;
 	struct v4l2_ctrl *ae_ctrl_mode_ctrl;
 	struct v4l2_ctrl *ae_flicker_freq_ctrl;
+	struct v4l2_ctrl *pixel_rate_ctrl;
+	struct v4l2_ctrl *vblank_ctrl;
+	struct v4l2_ctrl *expo_ctrl;
 	bool streaming;
 	struct v4l2_mbus_framefmt fmt;
 	const struct vd56g3_mode *current_mode;
-	struct v4l2_fract frame_interval;
 	bool hflip;
 	bool vflip;
-	int manual_expo_us;
+	u16 manual_expo;
 	enum vd56g3_expo_state expo_state;
 	u8 analog_gain;
 	u16 digital_gain;
+	u16 vblank;
+	u16 vblank_min;
+	u16 frame_length;
 	/* TODO: remove later */
 	bool is_cut2;
 };
@@ -630,51 +636,6 @@ static int vd56g3_get_regulators(struct vd56g3_dev *sensor)
 				       VD56G3_NUM_SUPPLIES, sensor->supplies);
 }
 
-static bool is_expo_valid(struct vd56g3_dev *sensor, int frame_length,
-			  int line_n, int *expo_us)
-{
-	/* FIXME : formulae need to be updated */
-	if (line_n < frame_length - 100)
-		return true;
-
-	*expo_us = *expo_us - 1;
-
-	return false;
-}
-
-static int apply_exposure(struct vd56g3_dev *sensor)
-{
-	struct i2c_client *client = sensor->i2c_client;
-	int frame_length;
-	int line_duration_ns;
-	int expo_line_nb;
-	int ret;
-	int expo_us = sensor->manual_expo_us;
-
-	dev_dbg(&client->dev, "%s request expo %d us", __func__, expo_us);
-	frame_length = vd56g3_read_reg(sensor, VD56G3_REG_FRAME_LENGTH);
-	if (frame_length < 0)
-		return frame_length;
-	line_duration_ns =
-		div64_u64((u64)sensor->line_length * 1000000000, sensor->pclk);
-
-	do {
-		expo_line_nb = (expo_us * 1000 + line_duration_ns / 2) /
-			       line_duration_ns;
-		expo_line_nb = max(1, expo_line_nb);
-	} while (!is_expo_valid(sensor, frame_length, expo_line_nb, &expo_us));
-
-	ret = vd56g3_write_reg(sensor, VD56G3_REG_MANUAL_COARSE_EXPOSURE,
-			       expo_line_nb, NULL);
-	if (ret)
-		return ret;
-
-	dev_dbg(&client->dev, "%s applied expo %d us", __func__, expo_us);
-	sensor->manual_expo_us = expo_us;
-
-	return 0;
-}
-
 static int vd56g3_update_patgen(struct vd56g3_dev *sensor, u32 index)
 {
 	u32 pattern = index <= 3 ? index : index + 12;
@@ -796,11 +757,13 @@ static int vd56g3_update_digital_gain(struct vd56g3_dev *sensor, u32 target)
 	return 0;
 }
 
-static int vd56g3_set_exposure(struct vd56g3_dev *sensor, int expo_us)
+static int vd56g3_update_exposure(struct vd56g3_dev *sensor, int expo_lines)
 {
-	sensor->manual_expo_us = expo_us;
+	sensor->manual_expo = expo_lines;
 	if (sensor->streaming)
-		return apply_exposure(sensor);
+		return vd56g3_write_reg(sensor,
+					VD56G3_REG_MANUAL_COARSE_EXPOSURE,
+					sensor->manual_expo, NULL);
 
 	return 0;
 }
@@ -890,15 +853,24 @@ static int vd56g3_try_fmt_internal(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int set_frame_rate(struct vd56g3_dev *sensor)
+static int vd56g3_apply_framelength(struct vd56g3_dev *sensor)
 {
-	u16 frame_length;
+	return vd56g3_write_reg(sensor, VD56G3_REG_FRAME_LENGTH,
+				sensor->frame_length, NULL);
+}
 
-	frame_length = sensor->pclk / (sensor->line_length *
-				       sensor->frame_interval.denominator);
+static int vd56g3_update_vblank(struct vd56g3_dev *sensor, u16 vblank)
+{
+	sensor->vblank_min =
+		VD56G3_FRAME_LENGTH_MIN - sensor->current_mode->crop.height;
+	sensor->vblank = vblank;
+	sensor->frame_length =
+		sensor->current_mode->crop.height + sensor->vblank;
 
-	return vd56g3_write_reg(sensor, VD56G3_REG_FRAME_LENGTH, frame_length,
-				NULL);
+	if (sensor->streaming)
+		return vd56g3_apply_framelength(sensor);
+
+	return 0;
 }
 
 static int vd56g3_stream_enable(struct vd56g3_dev *sensor)
@@ -934,13 +906,14 @@ static int vd56g3_stream_enable(struct vd56g3_dev *sensor)
 	if (ret)
 		return ret;
 
-	/* configure frame rate */
-	ret = set_frame_rate(sensor);
+	/* configure framelength / framerate */
+	ret = vd56g3_apply_framelength(sensor);
 	if (ret)
 		return ret;
 
 	/* apply exposure */
-	ret = apply_exposure(sensor);
+	ret = vd56g3_write_reg(sensor, VD56G3_REG_MANUAL_COARSE_EXPOSURE,
+			       sensor->manual_expo, NULL);
 	if (ret)
 		return ret;
 
@@ -1266,6 +1239,8 @@ static int vd56g3_configure(struct vd56g3_dev *sensor)
 
 	if (sensor->is_cut2) {
 		/* Update EXP_COARSE_INTG_MARGIN for proper behavior with OF */
+		// TODO: check with appli team why this value isn't already set by FMW (cf. assumptions in datasheet)
+		// looks like this is updated in a more recent fmw
 		vd56g3_write_reg(sensor, VD56G3_REG_EXP_COARSE_INTG_MARGIN, 68,
 				 &ret);
 	}
@@ -1297,8 +1272,6 @@ static int vd56g3_configure(struct vd56g3_dev *sensor)
  * - ``v4l2_subdev_video_ops``: **video-related** callbacks
  *
  *      + vd56g3_s_stream(). V4L2 notification that a video stream will start or has stopped.
- *      + vd56g3_g_frame_interval(). Callback to get the frame interval (period, in seconds, between consecutive video frames)
- *      + vd56g3_s_frame_interval(). Callback to set the frame interval (period, in seconds, between consecutive video frames)
  *
  * - ``v4l2_subdev_pad_ops``: **pad-level** callbacks
  *
@@ -1306,7 +1279,6 @@ static int vd56g3_configure(struct vd56g3_dev *sensor)
  *      + vd56g3_get_fmt() - Callback to get the frame format of specific subdev pads
  *      + vd56g3_set_fmt() - Callback to set a given frame format
  *      + vd56g3_enum_frame_size(). Callback to enumerate supported frame sizes
- *      + vd56g3_enum_frame_interval(). Callback to enumerate available frame intervals
  */
 
 /**
@@ -1334,82 +1306,6 @@ static int vd56g3_s_stream(struct v4l2_subdev *sd, int enable)
 out:
 	dev_dbg(&client->dev, "%s current now = %d / %d", __func__,
 		sensor->streaming, ret);
-	mutex_unlock(&sensor->lock);
-
-	return ret;
-}
-
-/**
- * vd56g3_g_frame_interval - Callback to get the frame interval
- * @sd: v4l2 subdevice entry point
- * @fi: the frame_interval to retrieve
- *
- * This callback enables to retrieve the current frame interval.
- * It will be triggered upon the VIDIOC_SUBDEV_G_FRAME_INTERVAL() ioctl call.
- */
-static int vd56g3_g_frame_interval(struct v4l2_subdev *sd,
-				   struct v4l2_subdev_frame_interval *fi)
-{
-	struct vd56g3_dev *sensor = to_vd56g3_dev(sd);
-
-	mutex_lock(&sensor->lock);
-	fi->interval = sensor->frame_interval;
-	mutex_unlock(&sensor->lock);
-
-	return 0;
-}
-
-/**
- * vd56g3_s_frame_interval - Callback to set the frame interval
- * @sd: v4l2 subdevice entry point
- * @fi: the frame interval to set
- *
- * This callback enables to change the frame interval with the given @fi value.
- * It will be triggered upon the VIDIOC_SUBDEV_S_FRAME_INTERVAL() ioctl call.
- */
-static int vd56g3_s_frame_interval(struct v4l2_subdev *sd,
-				   struct v4l2_subdev_frame_interval *fi)
-{
-	struct vd56g3_dev *sensor = to_vd56g3_dev(sd);
-	struct i2c_client *client = sensor->i2c_client;
-	u64 req_int, err, min_err = ~0ULL;
-	u64 test_int;
-	unsigned int i;
-	int ret;
-
-	if (fi->pad != 0)
-		return -EINVAL;
-
-	if (fi->interval.denominator == 0)
-		return -EINVAL;
-
-	mutex_lock(&sensor->lock);
-
-	if (sensor->streaming) {
-		ret = -EBUSY;
-		goto out;
-	}
-
-	dev_dbg(&client->dev, "%s request %d/%d\n", __func__,
-		fi->interval.numerator, fi->interval.denominator);
-	/* find nearest period */
-	req_int = div64_u64((u64)(fi->interval.numerator * 10000),
-			    fi->interval.denominator);
-	for (i = 0; i < ARRAY_SIZE(vd56g3_sensor_frame_rates); i++) {
-		test_int = div64_u64((u64)10000, vd56g3_sensor_frame_rates[i]);
-		err = abs(test_int - req_int);
-		if (err < min_err) {
-			fi->interval.numerator = 1;
-			fi->interval.denominator = vd56g3_sensor_frame_rates[i];
-			min_err = err;
-		}
-	}
-	sensor->frame_interval = fi->interval;
-	dev_dbg(&client->dev, "%s set     %d/%d\n", __func__,
-		fi->interval.numerator, fi->interval.denominator);
-
-	ret = 0;
-out:
 	mutex_unlock(&sensor->lock);
 
 	return ret;
@@ -1512,6 +1408,7 @@ static int vd56g3_set_fmt(struct v4l2_subdev *sd,
 	struct i2c_client *client = sensor->i2c_client;
 	const struct vd56g3_mode *new_mode;
 	struct v4l2_mbus_framefmt *fmt;
+	unsigned int expo_max;
 	int ret;
 
 	if (format->pad != 0)
@@ -1538,11 +1435,33 @@ static int vd56g3_set_fmt(struct v4l2_subdev *sd,
 #else
 		fmt = v4l2_subdev_get_try_format(sd, sd_state, 0);
 #endif
-	} else {
+		*fmt = format->format;
+	} else if (sensor->current_mode != new_mode ||
+		   sensor->fmt.code != format->format.code) {
+		// TODO : this nested 'if' shouldn't be necessary
+		// however it prevents unwanted behavior with qv4l2
 		fmt = &sensor->fmt;
+		*fmt = format->format;
 		sensor->current_mode = new_mode;
+
+		/* Update pixelrate, blanking and exposure */
+		__v4l2_ctrl_s_ctrl_int64(sensor->pixel_rate_ctrl,
+					 get_pixel_rate(sensor));
+		ret = vd56g3_update_vblank(sensor,
+					   VD56G3_FRAME_LENGTH_DEF_60FPS -
+						   new_mode->crop.height);
+		if (ret)
+			goto out;
+		__v4l2_ctrl_modify_range(sensor->vblank_ctrl,
+					 sensor->vblank_min,
+					 0xffff - new_mode->crop.height, 1,
+					 sensor->vblank);
+		// todo : isn't it redundant ?
+		__v4l2_ctrl_s_ctrl(sensor->vblank_ctrl, sensor->vblank);
+		expo_max = sensor->frame_length - VD56G3_EXPOSURE_OFFSET;
+		__v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max, 1,
+					 VD56G3_EXPOSURE_DEFAULT);
 	}
-	*fmt = format->format;
 
 out:
 	mutex_unlock(&sensor->lock);
@@ -1645,55 +1564,10 @@ static int vd56g3_enum_frame_size(struct v4l2_subdev *sd,
 	return 0;
 }
 
-/**
- * vd56g3_enum_frame_interval - Callback to enumerate available frame intervals
- * on a given sub-device pad
- * @sd: v4l2 subdevice entry point
- * @cfg: struct used for storing subdev pad information
- * @fie: pointer to struct v4l2_subdev_frame_interval_enum that the driver will
- * fill with the supported frame intervals
- *
- * This callback enables to enumerate available frame intervals on a given
- * sub-device pad. It will be triggered upon the
- * VIDIOC_SUBDEV_ENUM_FRAME_INTERVAL() ioctl call
- */
-static int
-vd56g3_enum_frame_interval(struct v4l2_subdev *sd,
-#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
-			   struct v4l2_subdev_pad_config *cfg,
-#else
-			   struct v4l2_subdev_state *sd_state,
-#endif
-			   struct v4l2_subdev_frame_interval_enum *fie)
-{
-	const struct vd56g3_mode *mode = vd56g3_supported_modes;
-	unsigned int i;
-
-	if (fie->pad != 0)
-		return -EINVAL;
-	if (fie->index >= ARRAY_SIZE(vd56g3_sensor_frame_rates))
-		return -EINVAL;
-
-	for (i = 0; i < ARRAY_SIZE(vd56g3_supported_modes); i++) {
-		if (mode->width <= fie->width && mode->height <= fie->height)
-			break;
-		mode++;
-	}
-	if (i == ARRAY_SIZE(vd56g3_supported_modes))
-		return -EINVAL;
-
-	fie->interval.numerator = 1;
-	fie->interval.denominator = vd56g3_sensor_frame_rates[fie->index];
-
-	return 0;
-}
-
 static const struct v4l2_subdev_core_ops vd56g3_core_ops = {};
 
 static const struct v4l2_subdev_video_ops vd56g3_video_ops = {
 	.s_stream = vd56g3_s_stream,
-	.g_frame_interval = vd56g3_g_frame_interval,
-	.s_frame_interval = vd56g3_s_frame_interval,
 };
 
 static const struct v4l2_subdev_pad_ops vd56g3_pad_ops = {
@@ -1703,7 +1577,6 @@ static const struct v4l2_subdev_pad_ops vd56g3_pad_ops = {
 	.init_cfg = vd56g3_init_cfg,
 	.get_selection = vd56g3_get_selection,
 	.enum_frame_size = vd56g3_enum_frame_size,
-	.enum_frame_interval = vd56g3_enum_frame_interval,
 };
 
 static const struct v4l2_subdev_ops vd56g3_subdev_ops = {
@@ -1807,6 +1680,7 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct v4l2_subdev *sd = ctrl_to_sd(ctrl);
 	struct vd56g3_dev *sensor = to_vd56g3_dev(sd);
+	unsigned int expo_max;
 	int ret;
 
 	switch (ctrl->id) {
@@ -1837,8 +1711,7 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 		ret = vd56g3_update_digital_gain(sensor, ctrl->val);
 		break;
 	case V4L2_CID_EXPOSURE:
-		ret = vd56g3_set_exposure(sensor, ctrl->val);
-		ctrl->val = sensor->manual_expo_us;
+		ret = vd56g3_update_exposure(sensor, ctrl->val);
 		break;
 	case V4L2_CID_3A_LOCK:
 		ret = vd56g3_lock_exposure(sensor, ctrl->val);
@@ -1849,6 +1722,13 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 			DIV_ROUND_CLOSEST((int)ev_bias_qmenu[ctrl->val] * 256,
 					  1000),
 			NULL);
+		break;
+	case V4L2_CID_VBLANK:
+		ret = vd56g3_update_vblank(sensor, ctrl->val);
+		/* Max exposure changes with vblank */
+		expo_max = sensor->frame_length - VD56G3_EXPOSURE_OFFSET;
+		__v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max, 1,
+					 VD56G3_EXPOSURE_DEFAULT);
 		break;
 	case V4L2_CID_GPIO0_MODE:
 	case V4L2_CID_GPIO1_MODE:
@@ -2204,6 +2084,7 @@ static int vd56g3_init_controls(struct vd56g3_dev *sensor)
 {
 	const struct v4l2_ctrl_ops *ops = &vd56g3_ctrl_ops;
 	struct v4l2_ctrl_handler *hdl = &sensor->ctrl_handler;
+	const struct vd56g3_mode *cur_mode = sensor->current_mode;
 	struct v4l2_ctrl *ctrl;
 	int ret;
 
@@ -2218,9 +2099,11 @@ static int vd56g3_init_controls(struct vd56g3_dev *sensor)
 				     ARRAY_SIZE(vd56g3_test_pattern_menu) - 1,
 				     0, 0, vd56g3_test_pattern_menu);
 	/* add V4L2_CID_PIXEL_RATE */
-	ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_PIXEL_RATE, 1, INT_MAX, 1,
-				 get_pixel_rate(sensor));
-	ctrl->flags |= V4L2_CTRL_FLAG_VOLATILE | V4L2_CTRL_FLAG_READ_ONLY;
+	sensor->pixel_rate_ctrl =
+		v4l2_ctrl_new_std(hdl, ops, V4L2_CID_PIXEL_RATE, 1, INT_MAX, 1,
+				  get_pixel_rate(sensor));
+	// TODO : no more V4L2_CTRL_FLAG_VOLATILE ?
+	sensor->pixel_rate_ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 	ctrl = v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_LINK_FREQ,
 				      ARRAY_SIZE(link_freq) - 1, 0, link_freq);
 	ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
@@ -2228,13 +2111,19 @@ static int vd56g3_init_controls(struct vd56g3_dev *sensor)
 	v4l2_ctrl_new_std_menu(hdl, ops, V4L2_CID_EXPOSURE_AUTO, 1, ~0x3,
 			       V4L2_EXPOSURE_AUTO);
 	/* V4L2_CID_ANALOGUE_GAIN */
+	// TODO : AGAIN for Fox can go to 8 (instead of '4')
+	// Check on new fmw if MAX_AG is = 8 by default
 	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_ANALOGUE_GAIN, 0, 24, 1,
 			  sensor->analog_gain);
 	/* V4L2_CID_DIGITAL_GAIN (TODO: define proper bounds with appli team)*/
+	/* Clamp to 8 instead of 16 ? ; If more, necessary to update MAX_DG.*/
 	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_DIGITAL_GAIN, 0, 0xfff, 1,
 			  sensor->digital_gain);
 	/* V4L2_CID_EXPOSURE */
-	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_EXPOSURE, 1, 500, 1, 10);
+	sensor->expo_ctrl =
+		v4l2_ctrl_new_std(hdl, ops, V4L2_CID_EXPOSURE, 0,
+				  sensor->frame_length - VD56G3_EXPOSURE_OFFSET,
+				  1, VD56G3_EXPOSURE_DEFAULT);
 	/* V4L2_CID_3A_LOCK */
 	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_3A_LOCK, 0, 7, 0, 0);
 	/* V4L2_CID_AUTO_EXPOSURE_BIAS */
@@ -2242,6 +2131,15 @@ static int vd56g3_init_controls(struct vd56g3_dev *sensor)
 			       ARRAY_SIZE(ev_bias_qmenu) - 1,
 			       (ARRAY_SIZE(ev_bias_qmenu) + 1) / 2 - 1,
 			       ev_bias_qmenu);
+	/* Blanking controls (and related)*/
+	ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HBLANK, 0,
+				 sensor->line_length, 1,
+				 sensor->line_length - cur_mode->width);
+	ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+	sensor->vblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VBLANK,
+						sensor->vblank_min,
+						0xffff - cur_mode->crop.height,
+						1, sensor->vblank);
 	/* gpios stuff */
 	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio0_ctrl, NULL);
 	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio1_ctrl, NULL);
@@ -2288,9 +2186,7 @@ static int vd56g3_probe(struct i2c_client *client)
 
 	sensor->i2c_client = client;
 	sensor->streaming = false;
-	sensor->frame_interval.numerator = 1;
-	sensor->frame_interval.denominator = 30;
-	sensor->manual_expo_us = 10000;
+	sensor->manual_expo = VD56G3_EXPOSURE_DEFAULT;
 	sensor->expo_state = VD56G3_EXPO_AUTO;
 	sensor->analog_gain = 0;
 	sensor->digital_gain = 0x100;
@@ -2396,15 +2292,28 @@ static int vd56g3_probe(struct i2c_client *client)
 		goto disable_clock;
 	}
 
-	ret = vd56g3_init_cfg(&sensor->sd, NULL);
+	// TODO : drop if possible
+	// Preset sensor internal to avoid NULL reference while calling vd56g3_init_controls()
+	sensor->current_mode = &vd56g3_supported_modes[0];
+	sensor->fmt.code = vd56g3_supported_codes[0].code;
+	ret = vd56g3_update_vblank(sensor,
+				   VD56G3_FRAME_LENGTH_DEF_60FPS -
+					   sensor->current_mode->crop.height);
 	if (ret) {
-		dev_err(&client->dev, "Init config failed %d", ret);
+		dev_err(&client->dev, "Vblank initialization failed %d", ret);
 		goto disable_clock;
 	}
 
 	ret = vd56g3_init_controls(sensor);
 	if (ret) {
 		dev_err(&client->dev, "controls initialization failed %d", ret);
+		goto disable_clock;
+	}
+
+	// TODO : temporary after vd56g3_init_controls() because at the end init_cfg make call of set_fmt which update existing controls (thus may have been initialized first)
+	ret = vd56g3_init_cfg(&sensor->sd, NULL);
+	if (ret) {
+		dev_err(&client->dev, "Init config failed %d", ret);
 		goto disable_clock;
 	}
 
