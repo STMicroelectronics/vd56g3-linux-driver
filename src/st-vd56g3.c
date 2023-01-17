@@ -103,9 +103,7 @@
 #define VD56G3_REG_GPIO_5_CTRL				VD56G3_REG_8BIT(0x046c)
 #define VD56G3_REG_GPIO_6_CTRL				VD56G3_REG_8BIT(0x046d)
 #define VD56G3_REG_GPIO_7_CTRL				VD56G3_REG_8BIT(0x046e)
-//TODO : Clean Me
 #define VD56G3_REG_READOUT_CTRL				VD56G3_REG_8BIT(0x047e)
-#define VD56G3_REG_READOUT_CTRL_CUT1			VD56G3_REG_8BIT(0x048e)
 
 #define VD56G3_MAX_WIDTH				1120
 #define VD56G3_MAX_HEIGHT				1364
@@ -133,7 +131,6 @@
 #define V4L2_CID_AE_LEAK_PROPORTION		(V4L2_CID_USER_BASE | 0x1025)
 /* parse-SNAP: */
 
-#include "st-vd56g3_patch_cut1.c"
 #include "st-vd56g3_patch_cut2.c"
 #include "st-vd56g3_vtpatch.c"
 
@@ -406,8 +403,6 @@ struct vd56g3_dev {
 	u16 vblank;
 	u16 vblank_min;
 	u16 frame_length;
-	/* TODO: remove later */
-	bool is_cut2;
 };
 
 /* helpers */
@@ -801,11 +796,7 @@ static int vd56g3_detect(struct vd56g3_dev *sensor)
 	if (device_revision < 0)
 		return device_revision;
 
-	if ((device_revision >> 8) == 0x20) {
-		sensor->is_cut2 = true;
-	} else if ((device_revision >> 8) == 0x10) {
-		sensor->is_cut2 = false;
-	} else {
+	if ((device_revision >> 8) != 0x20) {
 		dev_warn(&client->dev, "Unsupported Cut version %x",
 			 device_revision);
 		return -ENODEV;
@@ -889,13 +880,8 @@ static int vd56g3_stream_enable(struct vd56g3_dev *sensor)
 	vd56g3_write_reg(sensor, VD56G3_REG_ISL_ENABLE, is_isl, &ret);
 
 	/* configure size and bin mode */
-	if (sensor->is_cut2) {
-		vd56g3_write_reg(sensor, VD56G3_REG_READOUT_CTRL,
-				 sensor->current_mode->bin_mode, &ret);
-	} else {
-		vd56g3_write_reg(sensor, VD56G3_REG_READOUT_CTRL_CUT1,
-				 sensor->current_mode->bin_mode, &ret);
-	}
+	vd56g3_write_reg(sensor, VD56G3_REG_READOUT_CTRL,
+			 sensor->current_mode->bin_mode, &ret);
 	vd56g3_write_reg(sensor, VD56G3_REG_OUT_ROI_X_START, crop->left, &ret);
 	vd56g3_write_reg(sensor, VD56G3_REG_OUT_ROI_X_END,
 			 crop->left + crop->width - 1, &ret);
@@ -1047,20 +1033,13 @@ error_ep:
 static int vd56g3_patch(struct vd56g3_dev *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
-	const u8 *patch;
-	int patch_size;
+	const u8 *patch = patch_cut2;
+	int patch_size = sizeof(patch_cut2);
 	u8 patch_major;
 	u8 patch_minor;
 	int cur_patch_rev;
 	int ret;
 
-	if (sensor->is_cut2) {
-		patch = patch_cut2;
-		patch_size = sizeof(patch_cut2);
-	} else {
-		patch = patch_cut1;
-		patch_size = sizeof(patch_cut1);
-	}
 	patch_major = patch[3];
 	patch_minor = patch[2];
 
@@ -1124,79 +1103,70 @@ static int vd56g3_vtpatch(struct vd56g3_dev *sensor)
 	int cur_vtpatch_rd_rev, cur_vtpatch_gr_rev, cur_vtpatch_gt_rev;
 	int ret = 0;
 
-	if (sensor->is_cut2) {
-		// VT Patch support only in Cut2.0
-		ret = vd56g3_write_reg(sensor, VD56G3_REG_VTPATCHING,
-				       VD56G3_CMD_START_VTRAM_UPDATE, NULL);
+	ret = vd56g3_write_reg(sensor, VD56G3_REG_VTPATCHING,
+			       VD56G3_CMD_START_VTRAM_UPDATE, NULL);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_poll_reg(sensor, VD56G3_REG_VTPATCHING, VD56G3_CMD_ACK);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY);
+	if (ret)
+		return ret;
+
+	for (i = 0; i < vtpatch_area_nb; i++) {
+		ret = vd56g3_write_array(sensor, vtpatch_desc[i].offset,
+					 vtpatch_desc[i].size,
+					 vtpatch + vtpatch_offset);
 		if (ret)
 			return ret;
 
-		ret = vd56g3_poll_reg(sensor, VD56G3_REG_VTPATCHING,
-				      VD56G3_CMD_ACK);
-		if (ret)
-			return ret;
-
-		ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY);
-		if (ret)
-			return ret;
-
-		for (i = 0; i < vtpatch_area_nb; i++) {
-			ret = vd56g3_write_array(sensor, vtpatch_desc[i].offset,
-						 vtpatch_desc[i].size,
-						 vtpatch + vtpatch_offset);
-			if (ret)
-				return ret;
-
-			vtpatch_offset += vtpatch_desc[i].size;
-		}
-		// TODO replace with correct register names
-		vd56g3_write_reg(sensor, VD56G3_REG_8BIT(0xd9f8), VT_REVISION,
-				 &ret);
-		vd56g3_write_reg(sensor, VD56G3_REG_8BIT(0xaffc), VT_REVISION,
-				 &ret);
-		vd56g3_write_reg(sensor, VD56G3_REG_8BIT(0xbbb4), VT_REVISION,
-				 &ret);
-		vd56g3_write_reg(sensor, VD56G3_REG_8BIT(0xb898), VT_REVISION,
-				 &ret);
-
-		vd56g3_write_reg(sensor, VD56G3_REG_VTPATCHING,
-				 VD56G3_CMD_END_VTRAM_UPDATE, &ret);
-		if (ret)
-			return ret;
-
-		ret = vd56g3_poll_reg(sensor, VD56G3_REG_VTPATCHING,
-				      VD56G3_CMD_ACK);
-		if (ret)
-			return ret;
-
-		ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY);
-		if (ret)
-			return ret;
-
-		cur_vtpatch_rd_rev =
-			vd56g3_read_reg(sensor, VD56G3_REG_VTIMING_RD_REVISION);
-		if (cur_vtpatch_rd_rev < 0)
-			return cur_vtpatch_rd_rev;
-		cur_vtpatch_gr_rev =
-			vd56g3_read_reg(sensor, VD56G3_REG_VTIMING_GR_REVISION);
-		if (cur_vtpatch_gr_rev < 0)
-			return cur_vtpatch_gr_rev;
-		cur_vtpatch_gt_rev =
-			vd56g3_read_reg(sensor, VD56G3_REG_VTIMING_GT_REVISION);
-		if (cur_vtpatch_gt_rev < 0)
-			return cur_vtpatch_gt_rev;
-
-		if (cur_vtpatch_rd_rev != VT_REVISION ||
-		    cur_vtpatch_gr_rev != VT_REVISION ||
-		    cur_vtpatch_gt_rev != VT_REVISION) {
-			dev_err(&client->dev,
-				"bad vtpatch version, expected %d got rd:%d, gr:%d gt:%d",
-				VT_REVISION, cur_vtpatch_rd_rev,
-				cur_vtpatch_gr_rev, cur_vtpatch_gt_rev);
-			return -ENODEV;
-		}
-		dev_info(&client->dev, "VT patch %d applied", VT_REVISION);
+		vtpatch_offset += vtpatch_desc[i].size;
 	}
+	// TODO replace with correct register names
+	vd56g3_write_reg(sensor, VD56G3_REG_8BIT(0xd9f8), VT_REVISION, &ret);
+	vd56g3_write_reg(sensor, VD56G3_REG_8BIT(0xaffc), VT_REVISION, &ret);
+	vd56g3_write_reg(sensor, VD56G3_REG_8BIT(0xbbb4), VT_REVISION, &ret);
+	vd56g3_write_reg(sensor, VD56G3_REG_8BIT(0xb898), VT_REVISION, &ret);
+
+	vd56g3_write_reg(sensor, VD56G3_REG_VTPATCHING,
+			 VD56G3_CMD_END_VTRAM_UPDATE, &ret);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_poll_reg(sensor, VD56G3_REG_VTPATCHING, VD56G3_CMD_ACK);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY);
+	if (ret)
+		return ret;
+
+	cur_vtpatch_rd_rev =
+		vd56g3_read_reg(sensor, VD56G3_REG_VTIMING_RD_REVISION);
+	if (cur_vtpatch_rd_rev < 0)
+		return cur_vtpatch_rd_rev;
+	cur_vtpatch_gr_rev =
+		vd56g3_read_reg(sensor, VD56G3_REG_VTIMING_GR_REVISION);
+	if (cur_vtpatch_gr_rev < 0)
+		return cur_vtpatch_gr_rev;
+	cur_vtpatch_gt_rev =
+		vd56g3_read_reg(sensor, VD56G3_REG_VTIMING_GT_REVISION);
+	if (cur_vtpatch_gt_rev < 0)
+		return cur_vtpatch_gt_rev;
+
+	if (cur_vtpatch_rd_rev != VT_REVISION ||
+	    cur_vtpatch_gr_rev != VT_REVISION ||
+	    cur_vtpatch_gt_rev != VT_REVISION) {
+		dev_err(&client->dev,
+			"bad vtpatch version, expected %d got rd:%d, gr:%d gt:%d",
+			VT_REVISION, cur_vtpatch_rd_rev, cur_vtpatch_gr_rev,
+			cur_vtpatch_gt_rev);
+		return -ENODEV;
+	}
+	dev_info(&client->dev, "VT patch %d applied", VT_REVISION);
 
 	return 0;
 }
