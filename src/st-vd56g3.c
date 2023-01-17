@@ -106,7 +106,6 @@
 //TODO : Clean Me
 #define VD56G3_REG_READOUT_CTRL				VD56G3_REG_8BIT(0x047e)
 #define VD56G3_REG_READOUT_CTRL_CUT1			VD56G3_REG_8BIT(0x048e)
-#define VD56G3_REG_EXP_COARSE_INTG_MARGIN		VD56G3_REG_16BIT(0x0946)
 
 #define VD56G3_MAX_WIDTH				1120
 #define VD56G3_MAX_HEIGHT				1364
@@ -1234,14 +1233,6 @@ static int vd56g3_configure(struct vd56g3_dev *sensor)
 	/* gpios in input (disabled) by default */
 	for (i = 0; i < 8; i++) {
 		vd56g3_write_reg(sensor, VD56G3_REG_GPIO_0_CTRL + i, 0x01,
-				 &ret);
-	}
-
-	if (sensor->is_cut2) {
-		/* Update EXP_COARSE_INTG_MARGIN for proper behavior with OF */
-		// TODO: check with appli team why this value isn't already set by FMW (cf. assumptions in datasheet)
-		// looks like this is updated in a more recent fmw
-		vd56g3_write_reg(sensor, VD56G3_REG_EXP_COARSE_INTG_MARGIN, 68,
 				 &ret);
 	}
 
