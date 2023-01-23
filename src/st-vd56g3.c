@@ -5,7 +5,6 @@
  * Copyright (C) STMicroelectronics SA 2019
  */
 
-#include <asm-generic/unaligned.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/gpio/consumer.h>
@@ -13,15 +12,17 @@
 #include <linux/iopoll.h>
 #include <linux/module.h>
 #include <linux/regulator/consumer.h>
+
+#include <asm/unaligned.h>
+
 #include <media/v4l2-async.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
 
-#include <linux/version.h>
-
 /* Backward compatibility */
+#include <linux/version.h>
 #if KERNEL_VERSION(5, 18, 0) >= LINUX_VERSION_CODE
 #define MIPI_CSI2_DT_RAW8	0x2a
 #define MIPI_CSI2_DT_RAW10	0x2b
@@ -35,11 +36,11 @@
 #include <linux/units.h>
 #endif
 
-#define VD56G3_REG_8BIT(n)				((1 << 16) | (n))
-#define VD56G3_REG_16BIT(n)				((2 << 16) | (n))
-#define VD56G3_REG_32BIT(n)				((4 << 16) | (n))
-#define VD56G3_REG_SIZE_SHIFT				16
-#define VD56G3_REG_ADDR_MASK				0xffff
+#define VD56G3_REG_SIZE_SHIFT		16
+#define VD56G3_REG_ADDR_MASK		0xffff
+#define VD56G3_REG_8BIT(n)		((1 << VD56G3_REG_SIZE_SHIFT) | (n))
+#define VD56G3_REG_16BIT(n)		((2 << VD56G3_REG_SIZE_SHIFT) | (n))
+#define VD56G3_REG_32BIT(n)		((4 << VD56G3_REG_SIZE_SHIFT) | (n))
 
 #define VD56G3_REG_MODEL_ID				VD56G3_REG_16BIT(0x0000)
 #define VD56G3_MODEL_ID					0x5603
@@ -135,50 +136,19 @@
 #include "st-vd56g3_patch_cut2.c"
 #include "st-vd56g3_vtpatch.c"
 
-static const char *const vd56g3_test_pattern_menu[] = {
-	"Disabled",
-	"Solid",
-	"Colorbar",
-	"Gradbar",
-	"Hgrey",
-	"Vgrey",
-	"Dgrey",
-	"PN28"
-};
-
-static const char *const vd56g3_gpios_modes[] = {
-	"disabled",
-	"strobe envelope positive",
-	"strobe envelope negative",
-};
-
-static const char *const vd56g3_ae_mode[] = {
-	"Priority to minimum gain",
-	"Priority to flicker free",
-};
-
-static const char *const vd56g3_ae_flicker_freq[] = {
-	"50Hz",
-	"60Hz",
-};
-
-/* Supported exposure bias values (-4.0EV .. +4.0EV) */
-static const s64 ev_bias_qmenu[] = { -4000, -3500, -3000, -2500, -2000, -1500,
-				     -1000, -500,  0,	  500,	 1000,	1500,
-				     2000,  2500,  3000,  3500,	 4000 };
-
 /* regulator supplies */
-static const char *const vd56g3_supply_name[] = {
+static const char *const vd56g3_supply_names[] = {
 	"VCORE",
 	"VDDIO",
 	"VANA",
 };
 
-#define VD56G3_NUM_SUPPLIES		ARRAY_SIZE(vd56g3_supply_name)
+#define VD56G3_NUM_SUPPLIES		ARRAY_SIZE(vd56g3_supply_names)
 
-static const s64 link_freq[] = {
-	402000000ULL
-};
+
+/* -----------------------------------------------------------------------------
+ * Modes and formats
+ */
 
 enum vd56g3_bin_mode {
 	VG56G3_BIN_MODE_NORMAL,
@@ -192,33 +162,6 @@ struct vd56g3_mode {
 	enum vd56g3_bin_mode bin_mode;
 	struct v4l2_rect crop;
 	int is_isl;
-};
-
-struct vd56g3_fmt_desc {
-	u32 code;
-	u8 bpp;
-	u8 data_type;
-};
-
-/* Sensor support 8bits and 10bits output in both variants
- *  - Monochrome
- *  - RGB (with all H/V flip variations)
- */
-static const unsigned int mbus_codes[2][5] = {
-	{
-		MEDIA_BUS_FMT_Y8_1X8,
-		MEDIA_BUS_FMT_SGRBG8_1X8,
-		MEDIA_BUS_FMT_SRGGB8_1X8,
-		MEDIA_BUS_FMT_SBGGR8_1X8,
-		MEDIA_BUS_FMT_SGBRG8_1X8,
-	},
-	{
-		MEDIA_BUS_FMT_Y10_1X10,
-		MEDIA_BUS_FMT_SGRBG10_1X10,
-		MEDIA_BUS_FMT_SRGGB10_1X10,
-		MEDIA_BUS_FMT_SBGGR10_1X10,
-		MEDIA_BUS_FMT_SGBRG10_1X10,
-	},
 };
 
 /**
@@ -356,13 +299,34 @@ static const struct vd56g3_mode vd56g3_supported_modes[] = {
 	},
 };
 
+/* Sensor support 8bits and 10bits output in both variants
+ *  - Monochrome
+ *  - RGB (with all H/V flip variations)
+ */
+static const unsigned int vd56g3_mbus_codes[2][5] = {
+	{
+		MEDIA_BUS_FMT_Y8_1X8,
+		MEDIA_BUS_FMT_SGRBG8_1X8,
+		MEDIA_BUS_FMT_SRGGB8_1X8,
+		MEDIA_BUS_FMT_SBGGR8_1X8,
+		MEDIA_BUS_FMT_SGBRG8_1X8,
+	},
+	{
+		MEDIA_BUS_FMT_Y10_1X10,
+		MEDIA_BUS_FMT_SGRBG10_1X10,
+		MEDIA_BUS_FMT_SRGGB10_1X10,
+		MEDIA_BUS_FMT_SBGGR10_1X10,
+		MEDIA_BUS_FMT_SGBRG10_1X10,
+	},
+};
+
 enum vd56g3_expo_state {
 	VD56G3_EXPO_AUTO,
 	VD56G3_EXPO_AUTO_FREEZE,
 	VD56G3_EXPO_MANUAL
 };
 
-struct vd56g3_dev {
+struct vd56g3 {
 	struct i2c_client *i2c_client;
 	struct v4l2_subdev sd;
 	struct media_pad pad;
@@ -398,125 +362,21 @@ struct vd56g3_dev {
 	u16 frame_length;
 };
 
-/* helpers */
-static inline struct vd56g3_dev *to_vd56g3_dev(struct v4l2_subdev *sd)
+static inline struct vd56g3 *to_vd56g3(struct v4l2_subdev *sd)
 {
-	return container_of(sd, struct vd56g3_dev, sd);
+	return container_of(sd, struct vd56g3, sd);
 }
 
 static inline struct v4l2_subdev *ctrl_to_sd(struct v4l2_ctrl *ctrl)
 {
-	return &container_of(ctrl->handler, struct vd56g3_dev, ctrl_handler)->sd;
+	return &container_of(ctrl->handler, struct vd56g3, ctrl_handler)->sd;
 }
 
-static u8 get_bpp_by_code(__u32 code)
-{
-	switch (code) {
-	case MEDIA_BUS_FMT_Y8_1X8:
-	case MEDIA_BUS_FMT_SGRBG8_1X8:
-	case MEDIA_BUS_FMT_SRGGB8_1X8:
-	case MEDIA_BUS_FMT_SBGGR8_1X8:
-	case MEDIA_BUS_FMT_SGBRG8_1X8:
-		return 8;
-	case MEDIA_BUS_FMT_Y10_1X10:
-	case MEDIA_BUS_FMT_SGRBG10_1X10:
-	case MEDIA_BUS_FMT_SRGGB10_1X10:
-	case MEDIA_BUS_FMT_SBGGR10_1X10:
-	case MEDIA_BUS_FMT_SGBRG10_1X10:
-		return 10;
-	default:
-		/* Should never happen */
-		WARN(1, "Unsupported code %d. default to 8 bpp", code);
-	}
-
-	return 8;
-}
-
-static u8 get_datatype_by_code(__u32 code)
-{
-	switch (code) {
-	case MEDIA_BUS_FMT_Y8_1X8:
-	case MEDIA_BUS_FMT_SGRBG8_1X8:
-	case MEDIA_BUS_FMT_SRGGB8_1X8:
-	case MEDIA_BUS_FMT_SBGGR8_1X8:
-	case MEDIA_BUS_FMT_SGBRG8_1X8:
-		return MIPI_CSI2_DT_RAW8;
-	case MEDIA_BUS_FMT_Y10_1X10:
-	case MEDIA_BUS_FMT_SGRBG10_1X10:
-	case MEDIA_BUS_FMT_SRGGB10_1X10:
-	case MEDIA_BUS_FMT_SBGGR10_1X10:
-	case MEDIA_BUS_FMT_SGBRG10_1X10:
-		return MIPI_CSI2_DT_RAW10;
-	default:
-		/* Should never happen */
-		WARN(1, "Unsupported code %d. default to MIPI_CSI2_DT_RAW8",
-		     code);
-	}
-
-	return MIPI_CSI2_DT_RAW8;
-}
-
-/* Media bus code is dependant of :
- *      - 8bits or 10bits output
- *      - variant : Mono or RGB
- *      - H/V flips parameters in case of RGB
+/* ----------------------------------------------------------------------------
+ * HW access
  */
-static u32 get_mbus_code(struct vd56g3_dev *sensor, u32 code)
-{
-	unsigned int i_bpp;
-	unsigned int j;
 
-	for (i_bpp = 0; i_bpp < ARRAY_SIZE(mbus_codes); i_bpp++) {
-		for (j = 0; j < ARRAY_SIZE(mbus_codes[i_bpp]); j++) {
-			if (mbus_codes[i_bpp][j] == code)
-				goto endloops;
-		}
-	}
-
-endloops:
-	if (i_bpp >= ARRAY_SIZE(mbus_codes))
-		i_bpp = 0;
-
-	if (!sensor->is_rgb)
-		j = 0;
-	else
-		j = 1 + (sensor->hflip_ctrl->val ? 1 : 0) +
-		    (sensor->vflip_ctrl->val ? 2 : 0);
-
-	return mbus_codes[i_bpp][j];
-}
-
-static void compute_pll_parameters_by_freq(u32 freq, unsigned int *prediv,
-					   unsigned int *mult)
-{
-	const unsigned int predivs[] = { 1, 2, 4 };
-	int i;
-
-	/*
-	 * freq range is [6Mhz-27Mhz] already checked.
-	 * output of divider should be in [6Mhz-12Mhz[.
-	 */
-	for (i = 0; i < ARRAY_SIZE(predivs); i++) {
-		*prediv = predivs[i];
-		if (freq / *prediv < 12 * HZ_PER_MHZ)
-			break;
-	}
-	WARN_ON(i == ARRAY_SIZE(predivs));
-
-	/*
-	 * target freq is 804Mhz. Don't change this as it will impact image
-	 * quality.
-	 */
-	*mult = ((804 * HZ_PER_MHZ) * (*prediv) + freq / 2) / freq;
-}
-
-static s32 get_pixel_rate(struct vd56g3_dev *sensor)
-{
-	return div64_u64((u64)sensor->data_rate_in_mbps * sensor->nb_of_lane,
-			 get_bpp_by_code(sensor->fmt.code));
-}
-
-static int get_chunk_size(struct vd56g3_dev *sensor)
+static int get_chunk_size(struct vd56g3 *sensor)
 {
 	int max_write_len = VD56G3_WRITE_MULTIPLE_CHUNK_MAX;
 	struct i2c_adapter *adapter = sensor->i2c_client->adapter;
@@ -529,7 +389,7 @@ static int get_chunk_size(struct vd56g3_dev *sensor)
 	return max(max_write_len, 1);
 }
 
-static int vd56g3_read_multiple(struct vd56g3_dev *sensor, u32 reg,
+static int vd56g3_read_multiple(struct vd56g3 *sensor, u32 reg,
 				unsigned int len)
 {
 	struct i2c_client *client = sensor->i2c_client;
@@ -563,14 +423,14 @@ static int vd56g3_read_multiple(struct vd56g3_dev *sensor, u32 reg,
 	return get_unaligned_le32(val);
 }
 
-static inline int vd56g3_read_reg(struct vd56g3_dev *sensor, u32 reg)
+static inline int vd56g3_read(struct vd56g3 *sensor, u32 reg)
 {
 	return vd56g3_read_multiple(sensor, reg & VD56G3_REG_ADDR_MASK,
 				    (reg >> VD56G3_REG_SIZE_SHIFT) & 7);
 }
 
-static int vd56g3_write_multiple(struct vd56g3_dev *sensor, u32 reg,
-				 const u8 *data, unsigned int len, int *err)
+static int vd56g3_write_multiple(struct vd56g3 *sensor, u32 reg, const u8 *data,
+				 unsigned int len, int *err)
 {
 	struct i2c_client *client = sensor->i2c_client;
 	struct i2c_msg msg;
@@ -605,16 +465,16 @@ static int vd56g3_write_multiple(struct vd56g3_dev *sensor, u32 reg,
 	return 0;
 }
 
-static inline int vd56g3_write_reg(struct vd56g3_dev *sensor, u32 reg, u32 val,
-				   int *err)
+static inline int vd56g3_write(struct vd56g3 *sensor, u32 reg, u32 val,
+			       int *err)
 {
 	return vd56g3_write_multiple(sensor, reg & VD56G3_REG_ADDR_MASK,
 				     (u8 *)&val,
 				     (reg >> VD56G3_REG_SIZE_SHIFT) & 7, err);
 }
 
-static int vd56g3_write_array(struct vd56g3_dev *sensor, u32 reg,
-			      unsigned int nb, const u8 *array)
+static int vd56g3_write_array(struct vd56g3 *sensor, u32 reg, unsigned int nb,
+			      const u8 *array)
 {
 	const unsigned int chunk_size = get_chunk_size(sensor);
 	int ret;
@@ -633,7 +493,7 @@ static int vd56g3_write_array(struct vd56g3_dev *sensor, u32 reg,
 	return 0;
 }
 
-static int vd56g3_poll_reg(struct vd56g3_dev *sensor, u32 reg, u8 poll_val)
+static int vd56g3_poll_reg(struct vd56g3 *sensor, u32 reg, u8 poll_val)
 {
 	const unsigned int loop_delay_ms = 10;
 	const unsigned int timeout_ms = 500;
@@ -642,7 +502,7 @@ static int vd56g3_poll_reg(struct vd56g3_dev *sensor, u32 reg, u8 poll_val)
 	int loop_nb = timeout_ms / loop_delay_ms;
 
 	while (--loop_nb) {
-		ret = vd56g3_read_reg(sensor, reg);
+		ret = vd56g3_read(sensor, reg);
 		if (ret < 0)
 			return ret;
 		if (ret == poll_val)
@@ -651,30 +511,155 @@ static int vd56g3_poll_reg(struct vd56g3_dev *sensor, u32 reg, u8 poll_val)
 	}
 	return -ETIMEDOUT;
 #else
-	return read_poll_timeout(vd56g3_read_reg, ret,
+	return read_poll_timeout(vd56g3_read, ret,
 				 ((ret < 0) || (ret == poll_val)),
 				 loop_delay_ms * 1000, timeout_ms * 1000, false,
 				 sensor, reg);
 #endif
 }
 
-static int vd56g3_wait_state(struct vd56g3_dev *sensor, int state)
+static int vd56g3_wait_state(struct vd56g3 *sensor, int state)
 {
 	return vd56g3_poll_reg(sensor, VD56G3_REG_SYSTEM_FSM, state);
 }
 
-static int vd56g3_get_regulators(struct vd56g3_dev *sensor)
+/* ----------------------------------------------------------------------------
+ * Controls: definitions, helpers and handlers
+ */
+
+static const char *const vd56g3_test_pattern_menu[] = {
+	"Disabled",
+	"Solid",
+	"Colorbar",
+	"Gradbar",
+	"Hgrey",
+	"Vgrey",
+	"Dgrey",
+	"PN28"
+};
+
+static const char *const vd56g3_gpios_modes[] = {
+	"disabled",
+	"strobe envelope positive",
+	"strobe envelope negative",
+};
+
+static const char *const vd56g3_ae_mode[] = {
+	"Priority to minimum gain",
+	"Priority to flicker free",
+};
+
+static const char *const vd56g3_ae_flicker_freq[] = {
+	"50Hz",
+	"60Hz",
+};
+
+/* Supported exposure bias values (-4.0EV .. +4.0EV) */
+static const s64 vd56g3_ev_bias_qmenu[] = { -4000, -3500, -3000, -2500, -2000,
+					    -1500, -1000, -500,	 0,	500,
+					    1000,  1500,  2000,	 2500,	3000,
+					    3500,  4000 };
+
+static const s64 vd56g3_link_freq[] = { 402000000ULL };
+
+static u8 vd56g3_get_bpp(__u32 code)
 {
-	int i;
+	switch (code) {
+	case MEDIA_BUS_FMT_Y8_1X8:
+	case MEDIA_BUS_FMT_SGRBG8_1X8:
+	case MEDIA_BUS_FMT_SRGGB8_1X8:
+	case MEDIA_BUS_FMT_SBGGR8_1X8:
+	case MEDIA_BUS_FMT_SGBRG8_1X8:
+		return 8;
+	case MEDIA_BUS_FMT_Y10_1X10:
+	case MEDIA_BUS_FMT_SGRBG10_1X10:
+	case MEDIA_BUS_FMT_SRGGB10_1X10:
+	case MEDIA_BUS_FMT_SBGGR10_1X10:
+	case MEDIA_BUS_FMT_SGBRG10_1X10:
+		return 10;
+	default:
+		/* Should never happen */
+		WARN(1, "Unsupported code %d. default to 8 bpp", code);
+	}
 
-	for (i = 0; i < VD56G3_NUM_SUPPLIES; i++)
-		sensor->supplies[i].supply = vd56g3_supply_name[i];
-
-	return devm_regulator_bulk_get(&sensor->i2c_client->dev,
-				       VD56G3_NUM_SUPPLIES, sensor->supplies);
+	return 8;
 }
 
-static int vd56g3_update_patgen(struct vd56g3_dev *sensor, u32 index)
+static u8 vd56g3_get_datatype(__u32 code)
+{
+	switch (code) {
+	case MEDIA_BUS_FMT_Y8_1X8:
+	case MEDIA_BUS_FMT_SGRBG8_1X8:
+	case MEDIA_BUS_FMT_SRGGB8_1X8:
+	case MEDIA_BUS_FMT_SBGGR8_1X8:
+	case MEDIA_BUS_FMT_SGBRG8_1X8:
+		return MIPI_CSI2_DT_RAW8;
+	case MEDIA_BUS_FMT_Y10_1X10:
+	case MEDIA_BUS_FMT_SGRBG10_1X10:
+	case MEDIA_BUS_FMT_SRGGB10_1X10:
+	case MEDIA_BUS_FMT_SBGGR10_1X10:
+	case MEDIA_BUS_FMT_SGBRG10_1X10:
+		return MIPI_CSI2_DT_RAW10;
+	default:
+		/* Should never happen */
+		WARN(1, "Unsupported code %d. default to MIPI_CSI2_DT_RAW8",
+		     code);
+	}
+
+	return MIPI_CSI2_DT_RAW8;
+}
+
+static int vd56g3_apply_framelength(struct vd56g3 *sensor)
+{
+	return vd56g3_write(sensor, VD56G3_REG_FRAME_LENGTH,
+			    sensor->frame_length, NULL);
+}
+
+static s32 vd56g3_get_pixel_rate(struct vd56g3 *sensor)
+{
+	return div64_u64((u64)sensor->data_rate_in_mbps * sensor->nb_of_lane,
+			 vd56g3_get_bpp(sensor->fmt.code));
+}
+
+static int vd56g3_get_temp_stream_enable(struct vd56g3 *sensor, int *temp)
+{
+	int temperature;
+
+	temperature = vd56g3_read(sensor, VD56G3_REG_TEMPERATURE);
+	if (temperature < 0)
+		return temperature;
+
+	*temp = temperature;
+
+	return 0;
+}
+
+static int vd56g3_get_temp_stream_disable(struct vd56g3 *sensor, int *temp)
+{
+	int ret;
+
+	/* request temperature read */
+	ret = vd56g3_write(sensor, VD56G3_REG_STBY, VD56G3_CMD_THSENS_READ,
+			   NULL);
+	if (ret)
+		return ret;
+	ret = vd56g3_poll_reg(sensor, VD56G3_REG_STBY, VD56G3_CMD_ACK);
+	if (ret)
+		return ret;
+
+	return vd56g3_get_temp_stream_enable(sensor, temp);
+}
+
+static int vd56g3_get_temp(struct vd56g3 *sensor, int *temp)
+{
+	*temp = 0;
+	if (sensor->streaming)
+		return vd56g3_get_temp_stream_enable(sensor, temp);
+	else
+		return vd56g3_get_temp_stream_disable(sensor, temp);
+}
+
+static int vd56g3_update_patgen(struct vd56g3 *sensor, u32 index)
 {
 	u32 pattern = index <= 3 ? index : index + 12;
 	u16 reg;
@@ -683,10 +668,10 @@ static int vd56g3_update_patgen(struct vd56g3_dev *sensor, u32 index)
 	if (index)
 		reg |= 1;
 
-	return vd56g3_write_reg(sensor, VD56G3_REG_PATGEN_CTRL, reg, NULL);
+	return vd56g3_write(sensor, VD56G3_REG_PATGEN_CTRL, reg, NULL);
 }
 
-static int vd56g3_update_exposure_auto(struct vd56g3_dev *sensor, u32 index)
+static int vd56g3_update_exposure_auto(struct vd56g3 *sensor, u32 index)
 {
 	int ret = 0;
 
@@ -697,13 +682,13 @@ static int vd56g3_update_exposure_auto(struct vd56g3_dev *sensor, u32 index)
 
 	switch (index) {
 	case V4L2_EXPOSURE_AUTO:
-		vd56g3_write_reg(sensor, VD56G3_REG_EXP_MODE,
-				 VD56G3_EXP_MODE_AUTO, &ret);
+		vd56g3_write(sensor, VD56G3_REG_EXP_MODE, VD56G3_EXP_MODE_AUTO,
+			     &ret);
 		sensor->expo_state = VD56G3_EXPO_AUTO;
 		break;
 	case V4L2_EXPOSURE_MANUAL:
-		vd56g3_write_reg(sensor, VD56G3_REG_EXP_MODE,
-				 VD56G3_EXP_MODE_MANUAL, &ret);
+		vd56g3_write(sensor, VD56G3_REG_EXP_MODE,
+			     VD56G3_EXP_MODE_MANUAL, &ret);
 		sensor->expo_state = VD56G3_EXPO_MANUAL;
 		break;
 	default:
@@ -713,7 +698,37 @@ static int vd56g3_update_exposure_auto(struct vd56g3_dev *sensor, u32 index)
 	return ret;
 }
 
-static int vd56g3_lock_exposure(struct vd56g3_dev *sensor, u32 is_lock)
+static int vd56g3_update_analog_gain(struct vd56g3 *sensor, u32 target)
+{
+	sensor->analog_gain = target;
+	if (sensor->streaming)
+		return vd56g3_write(sensor, VD56G3_REG_MANUAL_ANALOG_GAIN,
+				    target, NULL);
+
+	return 0;
+}
+
+static int vd56g3_update_digital_gain(struct vd56g3 *sensor, u32 target)
+{
+	sensor->digital_gain = target;
+	if (sensor->streaming)
+		return vd56g3_write(sensor, VD56G3_REG_MANUAL_DIGITAL_GAIN,
+				    target, NULL);
+
+	return 0;
+}
+
+static int vd56g3_update_exposure(struct vd56g3 *sensor, int expo_lines)
+{
+	sensor->manual_expo = expo_lines;
+	if (sensor->streaming)
+		return vd56g3_write(sensor, VD56G3_REG_MANUAL_COARSE_EXPOSURE,
+				    sensor->manual_expo, NULL);
+
+	return 0;
+}
+
+static int vd56g3_lock_exposure(struct vd56g3 *sensor, u32 is_lock)
 {
 	/* only exposure lock is supported */
 	if ((is_lock & 1) != is_lock)
@@ -723,171 +738,12 @@ static int vd56g3_lock_exposure(struct vd56g3_dev *sensor, u32 is_lock)
 	if (sensor->expo_state == VD56G3_EXPO_MANUAL)
 		return -EINVAL;
 
-	return vd56g3_write_reg(
+	return vd56g3_write(
 		sensor, VD56G3_REG_EXP_MODE,
 		is_lock ? VD56G3_EXP_MODE_FREEZE : VD56G3_EXP_MODE_AUTO, NULL);
 }
 
-static int vd56g3_update_gpiox_strobe_mode(struct vd56g3_dev *sensor, u32 mode,
-					   int idx)
-{
-	u8 regs[ARRAY_SIZE(vd56g3_gpios_modes)] = { 0x01, 0x02, 0x22 };
-
-	return vd56g3_write_reg(sensor, VD56G3_REG_GPIO_0_CTRL + idx,
-				regs[mode], NULL);
-}
-
-static int vd56g3_get_temp_stream_enable(struct vd56g3_dev *sensor, int *temp)
-{
-	int temperature;
-
-	temperature = vd56g3_read_reg(sensor, VD56G3_REG_TEMPERATURE);
-	if (temperature < 0)
-		return temperature;
-
-	*temp = temperature;
-
-	return 0;
-}
-
-static int vd56g3_get_temp_stream_disable(struct vd56g3_dev *sensor, int *temp)
-{
-	int ret;
-
-	/* request temperature read */
-	ret = vd56g3_write_reg(sensor, VD56G3_REG_STBY, VD56G3_CMD_THSENS_READ,
-			       NULL);
-	if (ret)
-		return ret;
-	ret = vd56g3_poll_reg(sensor, VD56G3_REG_STBY, VD56G3_CMD_ACK);
-	if (ret)
-		return ret;
-
-	return vd56g3_get_temp_stream_enable(sensor, temp);
-}
-
-static int vd56g3_get_temp(struct vd56g3_dev *sensor, int *temp)
-{
-	*temp = 0;
-	if (sensor->streaming)
-		return vd56g3_get_temp_stream_enable(sensor, temp);
-	else
-		return vd56g3_get_temp_stream_disable(sensor, temp);
-}
-
-static int vd56g3_update_analog_gain(struct vd56g3_dev *sensor, u32 target)
-{
-	sensor->analog_gain = target;
-	if (sensor->streaming)
-		return vd56g3_write_reg(sensor, VD56G3_REG_MANUAL_ANALOG_GAIN,
-					target, NULL);
-
-	return 0;
-}
-
-static int vd56g3_update_digital_gain(struct vd56g3_dev *sensor, u32 target)
-{
-	sensor->digital_gain = target;
-	if (sensor->streaming)
-		return vd56g3_write_reg(sensor, VD56G3_REG_MANUAL_DIGITAL_GAIN,
-					target, NULL);
-
-	return 0;
-}
-
-static int vd56g3_update_exposure(struct vd56g3_dev *sensor, int expo_lines)
-{
-	sensor->manual_expo = expo_lines;
-	if (sensor->streaming)
-		return vd56g3_write_reg(sensor,
-					VD56G3_REG_MANUAL_COARSE_EXPOSURE,
-					sensor->manual_expo, NULL);
-
-	return 0;
-}
-
-static void vd56g3_apply_reset(struct vd56g3_dev *sensor)
-{
-	gpiod_set_value_cansleep(sensor->reset_gpio, 0);
-	usleep_range(5000, 10000);
-	gpiod_set_value_cansleep(sensor->reset_gpio, 1);
-	usleep_range(5000, 10000);
-	gpiod_set_value_cansleep(sensor->reset_gpio, 0);
-	usleep_range(5000, 10000);
-}
-
-static int vd56g3_detect(struct vd56g3_dev *sensor)
-{
-	struct i2c_client *client = sensor->i2c_client;
-	int id = 0;
-	int device_revision = 0;
-	int ret;
-
-	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_READY_TO_BOOT);
-	if (ret)
-		return ret;
-
-	id = vd56g3_read_reg(sensor, VD56G3_REG_MODEL_ID);
-	if (id < 0)
-		return id;
-
-	if (id != VD56G3_MODEL_ID) {
-		dev_warn(&client->dev, "Unsupported sensor id %x", id);
-		return -ENODEV;
-	}
-
-	device_revision = vd56g3_read_reg(sensor, VD56G3_REG_REVISION);
-	if (device_revision < 0)
-		return device_revision;
-
-	if ((device_revision >> 8) != 0x20) {
-		dev_warn(&client->dev, "Unsupported Cut version %x",
-			 device_revision);
-		return -ENODEV;
-	}
-
-	return 0;
-}
-
-static int vd56g3_try_fmt_internal(struct v4l2_subdev *sd,
-				   struct v4l2_mbus_framefmt *fmt,
-				   const struct vd56g3_mode **new_mode)
-{
-	const struct vd56g3_mode *mode = vd56g3_supported_modes;
-	struct vd56g3_dev *sensor = to_vd56g3_dev(sd);
-	unsigned int i;
-
-	/* select code */
-	fmt->code = get_mbus_code(sensor, fmt->code);
-
-	/* select size */
-	for (i = 0; i < ARRAY_SIZE(vd56g3_supported_modes); i++) {
-		if (mode->width <= fmt->width && mode->height <= fmt->height)
-			break;
-		mode++;
-	}
-	if (i == ARRAY_SIZE(vd56g3_supported_modes))
-		mode--;
-
-	*new_mode = mode;
-	fmt->width = mode->width;
-	fmt->height = mode->height;
-	fmt->colorspace = V4L2_COLORSPACE_RAW;
-	fmt->field = V4L2_FIELD_NONE;
-	fmt->ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
-	fmt->quantization = V4L2_QUANTIZATION_DEFAULT;
-	fmt->xfer_func = V4L2_XFER_FUNC_DEFAULT;
-
-	return 0;
-}
-
-static int vd56g3_apply_framelength(struct vd56g3_dev *sensor)
-{
-	return vd56g3_write_reg(sensor, VD56G3_REG_FRAME_LENGTH,
-				sensor->frame_length, NULL);
-}
-
-static int vd56g3_update_vblank(struct vd56g3_dev *sensor, u16 vblank)
+static int vd56g3_update_vblank(struct vd56g3 *sensor, u16 vblank)
 {
 	sensor->vblank_min =
 		VD56G3_FRAME_LENGTH_MIN - sensor->current_mode->crop.height;
@@ -901,698 +757,14 @@ static int vd56g3_update_vblank(struct vd56g3_dev *sensor, u16 vblank)
 	return 0;
 }
 
-static int vd56g3_stream_enable(struct vd56g3_dev *sensor)
+static int vd56g3_update_gpiox_strobe_mode(struct vd56g3 *sensor, u32 mode,
+					   int idx)
 {
-	const struct v4l2_rect *crop = &sensor->current_mode->crop;
-	int is_isl = sensor->current_mode->is_isl;
-	int ret = 0;
+	u8 regs[ARRAY_SIZE(vd56g3_gpios_modes)] = { 0x01, 0x02, 0x22 };
 
-	/* configure output mode */
-	vd56g3_write_reg(sensor, VD56G3_REG_FORMAT_CTRL,
-			 get_bpp_by_code(sensor->fmt.code), &ret);
-	vd56g3_write_reg(sensor, VD56G3_REG_OIF_IMG_CTRL,
-			 get_datatype_by_code(sensor->fmt.code), &ret);
-	vd56g3_write_reg(sensor, VD56G3_REG_OIF_ISL_CTRL,
-			 is_isl ? get_datatype_by_code(sensor->fmt.code) : 0x12,
-			 &ret);
-	vd56g3_write_reg(sensor, VD56G3_REG_ISL_ENABLE, is_isl, &ret);
-
-	/* configure size and bin mode */
-	vd56g3_write_reg(sensor, VD56G3_REG_READOUT_CTRL,
-			 sensor->current_mode->bin_mode, &ret);
-	vd56g3_write_reg(sensor, VD56G3_REG_OUT_ROI_X_START, crop->left, &ret);
-	vd56g3_write_reg(sensor, VD56G3_REG_OUT_ROI_X_END,
-			 crop->left + crop->width - 1, &ret);
-	vd56g3_write_reg(sensor, VD56G3_REG_OUT_ROI_Y_START, crop->top, &ret);
-	vd56g3_write_reg(sensor, VD56G3_REG_OUT_ROI_Y_END,
-			 crop->top + crop->height - 1, &ret);
-	if (ret)
-		return ret;
-
-	/* configure framelength / framerate */
-	ret = vd56g3_apply_framelength(sensor);
-	if (ret)
-		return ret;
-
-	/* apply exposure */
-	ret = vd56g3_write_reg(sensor, VD56G3_REG_MANUAL_COARSE_EXPOSURE,
-			       sensor->manual_expo, NULL);
-	if (ret)
-		return ret;
-
-	/* apply gains */
-	ret = vd56g3_write_reg(sensor, VD56G3_REG_MANUAL_ANALOG_GAIN,
-			       sensor->analog_gain, NULL);
-	if (ret)
-		return ret;
-	ret = vd56g3_write_reg(sensor, VD56G3_REG_MANUAL_DIGITAL_GAIN,
-			       sensor->digital_gain, NULL);
-	if (ret)
-		return ret;
-
-	/* start streaming */
-	ret = vd56g3_write_reg(sensor, VD56G3_REG_STBY, VD56G3_CMD_START_STREAM,
-			       NULL);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_poll_reg(sensor, VD56G3_REG_STBY, VD56G3_CMD_ACK);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_STREAMING);
-	if (ret)
-		return ret;
-
-	return 0;
+	return vd56g3_write(sensor, VD56G3_REG_GPIO_0_CTRL + idx, regs[mode],
+			    NULL);
 }
-
-static int vd56g3_stream_disable(struct vd56g3_dev *sensor)
-{
-	int ret;
-
-	ret = vd56g3_write_reg(sensor, VD56G3_REG_STREAMING,
-			       VD56G3_CMD_STOP_STREAM, NULL);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_poll_reg(sensor, VD56G3_REG_STREAMING, VD56G3_CMD_ACK);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY);
-	if (ret)
-		return ret;
-
-	return 0;
-}
-
-static int vd56g3_rx_from_ep(struct vd56g3_dev *sensor,
-			     struct fwnode_handle *endpoint)
-{
-	struct i2c_client *client = sensor->i2c_client;
-	struct v4l2_fwnode_endpoint *ep;
-	u32 log2phy[3] = { ~0, ~0, ~0 };
-	u32 phy2log[3] = { ~0, ~0, ~0 };
-	int polarities[3] = { 0, 0, 0 };
-	int l_nb;
-	int p, l;
-	int i;
-
-#if KERNEL_VERSION(4, 20, 0) >= LINUX_VERSION_CODE
-	ep = v4l2_fwnode_endpoint_alloc_parse(endpoint);
-	if (IS_ERR(ep))
-		return -EINVAL;
-#else
-	struct v4l2_fwnode_endpoint ep_node = { .bus_type =
-							V4L2_MBUS_CSI2_DPHY };
-	int ret;
-
-	ep = &ep_node;
-	ret = v4l2_fwnode_endpoint_alloc_parse(endpoint, ep);
-	if (ret)
-		return -EINVAL;
-#endif
-
-	l_nb = ep->bus.mipi_csi2.num_data_lanes;
-	if (l_nb != 1 && l_nb != 2) {
-		dev_err(&client->dev, "invalid data lane number %d\n", l_nb);
-		goto error_ep;
-	}
-
-	/* build  log2phy, phy2log and polarities from ep info */
-	log2phy[0] = ep->bus.mipi_csi2.clock_lane;
-	phy2log[log2phy[0]] = 0;
-	for (l = 1; l < l_nb + 1; l++) {
-		log2phy[l] = ep->bus.mipi_csi2.data_lanes[l - 1];
-		phy2log[log2phy[l]] = l;
-	}
-	/*
-	 * then fill remaining slots for every physical slot have something
-	 * valid for hardware stuff.
-	 */
-	for (p = 0; p < 3; p++) {
-		if (phy2log[p] != ~0)
-			continue;
-		phy2log[p] = l;
-		log2phy[l] = p;
-		l++;
-	}
-	for (l = 0; l < l_nb + 1; l++)
-		polarities[l] = ep->bus.mipi_csi2.lane_polarities[l];
-
-	if (log2phy[0] != 0) {
-		dev_err(&client->dev,
-			"clk lane must be map to physical lane 0\n");
-		goto error_ep;
-	}
-	sensor->oif_ctrl = l_nb | (polarities[0] << 3) |
-			   ((phy2log[1] - 1) << 4) | (polarities[1] << 6) |
-			   ((phy2log[2] - 1) << 7) | (polarities[2] << 9);
-	sensor->nb_of_lane = l_nb;
-
-	dev_dbg(&client->dev, "rx use %d lanes", l_nb);
-	for (i = 0; i < 3; i++) {
-		dev_dbg(&client->dev, "log2phy[%d] = %d", i, log2phy[i]);
-		dev_dbg(&client->dev, "phy2log[%d] = %d", i, phy2log[i]);
-		dev_dbg(&client->dev, "polarity[%d] = %d", i, polarities[i]);
-	}
-	dev_dbg(&client->dev, "oif_ctrl = 0x%04x\n", sensor->oif_ctrl);
-
-	v4l2_fwnode_endpoint_free(ep);
-
-	return 0;
-
-error_ep:
-	v4l2_fwnode_endpoint_free(ep);
-	return -EINVAL;
-}
-
-static int vd56g3_patch(struct vd56g3_dev *sensor)
-{
-	struct i2c_client *client = sensor->i2c_client;
-	const u8 *patch = patch_cut2;
-	int patch_size = sizeof(patch_cut2);
-	u8 patch_major;
-	u8 patch_minor;
-	int cur_patch_rev;
-	int ret;
-
-	patch_major = patch[3];
-	patch_minor = patch[2];
-
-	ret = vd56g3_write_array(sensor, 0x2000, patch_size, patch);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_write_reg(sensor, VD56G3_REG_BOOT, VD56G3_CMD_PATCH_SETUP,
-			       NULL);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_poll_reg(sensor, VD56G3_REG_BOOT, VD56G3_CMD_ACK);
-	if (ret)
-		return ret;
-
-	cur_patch_rev = vd56g3_read_reg(sensor, VD56G3_REG_FWPATCH_REVISION);
-	if (cur_patch_rev < 0)
-		return cur_patch_rev;
-
-	if (cur_patch_rev != (patch_major << 8) + patch_minor) {
-		dev_err(&client->dev,
-			"bad patch version expected %d.%d got %d.%d",
-			patch_major, patch_minor, cur_patch_rev >> 8,
-			cur_patch_rev & 0xff);
-		return -ENODEV;
-	}
-	dev_info(&client->dev, "patch %d.%d applied", cur_patch_rev >> 8,
-		 cur_patch_rev & 0xff);
-
-	return 0;
-}
-
-static int vd56g3_boot(struct vd56g3_dev *sensor)
-{
-	struct i2c_client *client = sensor->i2c_client;
-	int ret;
-
-	ret = vd56g3_write_reg(sensor, VD56G3_REG_BOOT, VD56G3_CMD_BOOT, NULL);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_poll_reg(sensor, VD56G3_REG_BOOT, VD56G3_CMD_ACK);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY);
-	if (ret)
-		return ret;
-
-	dev_info(&client->dev, "sensor boot successfully");
-
-	return 0;
-}
-
-static int vd56g3_vtpatch(struct vd56g3_dev *sensor)
-{
-	struct i2c_client *client = sensor->i2c_client;
-	int i;
-	int vtpatch_offset = 0;
-	int cur_vtpatch_rd_rev, cur_vtpatch_gr_rev, cur_vtpatch_gt_rev;
-	int ret = 0;
-
-	ret = vd56g3_write_reg(sensor, VD56G3_REG_VTPATCHING,
-			       VD56G3_CMD_START_VTRAM_UPDATE, NULL);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_poll_reg(sensor, VD56G3_REG_VTPATCHING, VD56G3_CMD_ACK);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY);
-	if (ret)
-		return ret;
-
-	for (i = 0; i < vtpatch_area_nb; i++) {
-		ret = vd56g3_write_array(sensor, vtpatch_desc[i].offset,
-					 vtpatch_desc[i].size,
-					 vtpatch + vtpatch_offset);
-		if (ret)
-			return ret;
-
-		vtpatch_offset += vtpatch_desc[i].size;
-	}
-	// TODO replace with correct register names
-	vd56g3_write_reg(sensor, VD56G3_REG_8BIT(0xd9f8), VT_REVISION, &ret);
-	vd56g3_write_reg(sensor, VD56G3_REG_8BIT(0xaffc), VT_REVISION, &ret);
-	vd56g3_write_reg(sensor, VD56G3_REG_8BIT(0xbbb4), VT_REVISION, &ret);
-	vd56g3_write_reg(sensor, VD56G3_REG_8BIT(0xb898), VT_REVISION, &ret);
-
-	vd56g3_write_reg(sensor, VD56G3_REG_VTPATCHING,
-			 VD56G3_CMD_END_VTRAM_UPDATE, &ret);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_poll_reg(sensor, VD56G3_REG_VTPATCHING, VD56G3_CMD_ACK);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY);
-	if (ret)
-		return ret;
-
-	cur_vtpatch_rd_rev =
-		vd56g3_read_reg(sensor, VD56G3_REG_VTIMING_RD_REVISION);
-	if (cur_vtpatch_rd_rev < 0)
-		return cur_vtpatch_rd_rev;
-	cur_vtpatch_gr_rev =
-		vd56g3_read_reg(sensor, VD56G3_REG_VTIMING_GR_REVISION);
-	if (cur_vtpatch_gr_rev < 0)
-		return cur_vtpatch_gr_rev;
-	cur_vtpatch_gt_rev =
-		vd56g3_read_reg(sensor, VD56G3_REG_VTIMING_GT_REVISION);
-	if (cur_vtpatch_gt_rev < 0)
-		return cur_vtpatch_gt_rev;
-
-	if (cur_vtpatch_rd_rev != VT_REVISION ||
-	    cur_vtpatch_gr_rev != VT_REVISION ||
-	    cur_vtpatch_gt_rev != VT_REVISION) {
-		dev_err(&client->dev,
-			"bad vtpatch version, expected %d got rd:%d, gr:%d gt:%d",
-			VT_REVISION, cur_vtpatch_rd_rev, cur_vtpatch_gr_rev,
-			cur_vtpatch_gt_rev);
-		return -ENODEV;
-	}
-	dev_info(&client->dev, "VT patch %d applied", VT_REVISION);
-
-	return 0;
-}
-
-static int vd56g3_configure(struct vd56g3_dev *sensor)
-{
-	struct i2c_client *client = sensor->i2c_client;
-	unsigned int prediv;
-	unsigned int mult;
-	unsigned int i;
-	int line_length;
-	int optical_rev;
-	int ret = 0;
-
-	compute_pll_parameters_by_freq(sensor->clk_freq, &prediv, &mult);
-	/* cache line_length value */
-	line_length = vd56g3_read_reg(sensor, VD56G3_REG_LINE_LENGTH);
-	if (line_length < 0)
-		return line_length;
-	sensor->line_length = line_length;
-	/* configure clocks */
-	vd56g3_write_reg(sensor, VD56G3_REG_EXT_CLOCK, sensor->clk_freq, &ret);
-	vd56g3_write_reg(sensor, VD56G3_REG_CLK_PLL_PREDIV, prediv, &ret);
-	vd56g3_write_reg(sensor, VD56G3_REG_CLK_SYS_PLL_MULT, mult, &ret);
-
-	/* configure interface */
-	vd56g3_write_reg(sensor, VD56G3_REG_OIF_CTRL, sensor->oif_ctrl, &ret);
-	vd56g3_write_reg(sensor, VD56G3_REG_OIF_CSI_BITRATE, 804, &ret);
-	vd56g3_write_reg(sensor, VD56G3_REG_ISL_ENABLE, 0, &ret);
-
-	/* use auto expo by default */
-	vd56g3_write_reg(sensor, VD56G3_REG_EXP_MODE, VD56G3_EXP_MODE_AUTO,
-			 &ret);
-
-	/* gpios in input (disabled) by default */
-	for (i = 0; i < 8; i++) {
-		vd56g3_write_reg(sensor, VD56G3_REG_GPIO_0_CTRL + i, 0x01,
-				 &ret);
-	}
-
-	if (ret)
-		return ret;
-
-	sensor->data_rate_in_mbps = (mult * sensor->clk_freq) / prediv;
-	sensor->pclk = (sensor->data_rate_in_mbps * 2) / 10;
-	dev_dbg(&client->dev, "clock prediv = %d", prediv);
-	dev_dbg(&client->dev, "clock mult = %d", mult);
-	dev_info(&client->dev, "data rate = %d mbps",
-		 sensor->data_rate_in_mbps);
-
-	// TODO : move to a "better" place ?
-	optical_rev = vd56g3_read_reg(sensor, VD56G3_REG_OPTICAL_REVISION);
-	if (optical_rev < 0)
-		return optical_rev;
-
-	sensor->is_rgb = ((optical_rev & 1) == 1);
-
-	return 0;
-}
-
-/**
- * DOC: V4L2 exposed Operations
- *
- * **This sections contains all vd56g3 operations exposed through standard V4L2 API**
- *
- * See below the supported callbacks (categorized following V4L2 classification):
- *
- * - ``v4l2_subdev_core_ops``. **core ops** callbacks for subdev
- *
- *      + no callback defined here
- *
- * - ``v4l2_subdev_video_ops``: **video-related** callbacks
- *
- *      + vd56g3_s_stream(). V4L2 notification that a video stream will start or has stopped.
- *
- * - ``v4l2_subdev_pad_ops``: **pad-level** callbacks
- *
- *      + vd56g3_enum_mbus_code(). Callback to enumerate available media bus formats
- *      + vd56g3_get_fmt() - Callback to get the frame format of specific subdev pads
- *      + vd56g3_set_fmt() - Callback to set a given frame format
- *      + vd56g3_enum_frame_size(). Callback to enumerate supported frame sizes
- */
-
-/**
- * vd56g3_s_stream - Callback notifying the streaming start
- * @sd: v4l2 subdevice entry point
- * @enable: enable or disable stream
- */
-static int vd56g3_s_stream(struct v4l2_subdev *sd, int enable)
-{
-	struct vd56g3_dev *sensor = to_vd56g3_dev(sd);
-	int ret = 0;
-
-	mutex_lock(&sensor->lock);
-	if (sensor->streaming == enable) {
-		mutex_unlock(&sensor->lock);
-		return 0;
-	}
-
-	ret = enable ? vd56g3_stream_enable(sensor) :
-			     vd56g3_stream_disable(sensor);
-	if (!ret)
-		sensor->streaming = enable;
-	mutex_unlock(&sensor->lock);
-
-	/* h/v flips locked during streaming */
-	v4l2_ctrl_grab(sensor->hflip_ctrl, enable);
-	v4l2_ctrl_grab(sensor->vflip_ctrl, enable);
-
-	return ret;
-}
-
-/**
- * vd56g3_enum_mbus_code - Callback to enumerate available media bus formats
- * @sd: v4l2 subdevice entry point
- * @cfg: struct used for storing subdev pad information
- * @code: pointer to struct v4l2_subdev_mbus_code_enum that the driver will fill
- * with the available mbus format
- *
- * This callback enables to enumerate media bus formats available at a given
- * sub-device pad. It will be triggered upon the VIDIOC_SUBDEV_ENUM_MBUS_CODE()
- * ioctl call.
- */
-static int vd56g3_enum_mbus_code(struct v4l2_subdev *sd,
-#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
-				 struct v4l2_subdev_pad_config *cfg,
-#else
-				 struct v4l2_subdev_state *sd_state,
-#endif
-				 struct v4l2_subdev_mbus_code_enum *code)
-{
-	struct vd56g3_dev *sensor = to_vd56g3_dev(sd);
-
-	if (code->index >= ARRAY_SIZE(mbus_codes))
-		return -EINVAL;
-
-	code->code = get_mbus_code(sensor, mbus_codes[code->index][0]);
-
-	return 0;
-}
-
-/**
- * vd56g3_get_fmt - Callback to get the frame format of specific subdev pads
- * @sd: v4l2 subdevice entry point
- * @cfg: struct used for storing subdev pad information
- * @format: the v4l2_subdev_format struct for which format field will be filled
- * by the driver
- *
- * This callback enables to retrieve the frame format.
- * It will be triggered upon the VIDIOC_SUBDEV_G_FMT() ioctl call.
- */
-static int vd56g3_get_fmt(struct v4l2_subdev *sd,
-#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
-			  struct v4l2_subdev_pad_config *cfg,
-#else
-			  struct v4l2_subdev_state *sd_state,
-#endif
-			  struct v4l2_subdev_format *format)
-{
-	struct vd56g3_dev *sensor = to_vd56g3_dev(sd);
-	struct i2c_client *client = sensor->i2c_client;
-	struct v4l2_mbus_framefmt *mbus_fmt;
-
-	dev_dbg(&client->dev, "%s probe %d", __func__, format->pad);
-	if (format->pad != 0)
-		return -EINVAL;
-
-	mutex_lock(&sensor->lock);
-
-	if (format->which == V4L2_SUBDEV_FORMAT_TRY)
-#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
-		mbus_fmt = v4l2_subdev_get_try_format(&sensor->sd, cfg,
-						      format->pad);
-#else
-		mbus_fmt = v4l2_subdev_get_try_format(&sensor->sd, sd_state,
-						      format->pad);
-#endif
-	else
-		mbus_fmt = &sensor->fmt;
-
-	mbus_fmt->code = get_mbus_code(sensor, mbus_fmt->code);
-	format->format = *mbus_fmt;
-
-	mutex_unlock(&sensor->lock);
-
-	return 0;
-}
-
-/**
- * vd56g3_set_fmt - Callback to set a given frame format
- * @sd: v4l2 subdevice entry point
- * @cfg: struct used for storing subdev pad information
- * @format: the format to set
- *
- * This callback enables to change the format with the given @format value.
- * It will be triggered upon the VIDIOC_SUBDEV_S_FMT() ioctl call.
- */
-static int vd56g3_set_fmt(struct v4l2_subdev *sd,
-#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
-			  struct v4l2_subdev_pad_config *cfg,
-#else
-			  struct v4l2_subdev_state *sd_state,
-#endif
-			  struct v4l2_subdev_format *format)
-{
-	struct vd56g3_dev *sensor = to_vd56g3_dev(sd);
-	struct i2c_client *client = sensor->i2c_client;
-	const struct vd56g3_mode *new_mode;
-	struct v4l2_mbus_framefmt *fmt;
-	unsigned int expo_max;
-	int ret;
-
-	if (format->pad != 0)
-		return -EINVAL;
-
-	dev_dbg(&client->dev, "%s %dx%d", __func__, format->format.width,
-		format->format.height);
-
-	mutex_lock(&sensor->lock);
-
-	if (sensor->streaming) {
-		ret = -EBUSY;
-		goto out;
-	}
-
-	/* find best format */
-	ret = vd56g3_try_fmt_internal(sd, &format->format, &new_mode);
-	if (ret)
-		goto out;
-
-	if (format->which == V4L2_SUBDEV_FORMAT_TRY) {
-#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
-		fmt = v4l2_subdev_get_try_format(sd, cfg, 0);
-#else
-		fmt = v4l2_subdev_get_try_format(sd, sd_state, 0);
-#endif
-		*fmt = format->format;
-	} else if (sensor->current_mode != new_mode ||
-		   sensor->fmt.code != format->format.code) {
-		// TODO : this nested 'if' shouldn't be necessary
-		// however it prevents unwanted behavior with qv4l2
-		sensor->fmt = format->format;
-		sensor->current_mode = new_mode;
-
-		/* Update pixelrate, blanking and exposure */
-		__v4l2_ctrl_s_ctrl_int64(sensor->pixel_rate_ctrl,
-					 get_pixel_rate(sensor));
-		ret = vd56g3_update_vblank(sensor,
-					   VD56G3_FRAME_LENGTH_DEF_60FPS -
-						   new_mode->crop.height);
-		if (ret)
-			goto out;
-		__v4l2_ctrl_modify_range(sensor->vblank_ctrl,
-					 sensor->vblank_min,
-					 0xffff - new_mode->crop.height, 1,
-					 sensor->vblank);
-		// todo : isn't it redundant ?
-		__v4l2_ctrl_s_ctrl(sensor->vblank_ctrl, sensor->vblank);
-		expo_max = sensor->frame_length - VD56G3_EXPOSURE_OFFSET;
-		__v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max, 1,
-					 VD56G3_EXPOSURE_DEFAULT);
-	}
-
-out:
-	mutex_unlock(&sensor->lock);
-
-	return ret;
-}
-
-static int vd56g3_init_cfg(struct v4l2_subdev *sd,
-#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
-			   struct v4l2_subdev_pad_config *cfg)
-#else
-			   struct v4l2_subdev_state *sd_state)
-#endif
-{
-	struct vd56g3_dev *sensor = to_vd56g3_dev(sd);
-	struct v4l2_subdev_format fmt = { 0 };
-
-	// Default to native resolution mode
-	sensor->current_mode = &vd56g3_supported_modes[0];
-
-#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
-	fmt.which = cfg ? V4L2_SUBDEV_FORMAT_TRY : V4L2_SUBDEV_FORMAT_ACTIVE;
-#else
-	fmt.which = sd_state ? V4L2_SUBDEV_FORMAT_TRY :
-				     V4L2_SUBDEV_FORMAT_ACTIVE;
-#endif
-
-	fmt.format.width = sensor->current_mode->width;
-	fmt.format.height = sensor->current_mode->height;
-
-#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
-	return vd56g3_set_fmt(sd, cfg, &fmt);
-#else
-	return vd56g3_set_fmt(sd, sd_state, &fmt);
-#endif
-}
-
-static int vd56g3_get_selection(struct v4l2_subdev *sd,
-#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
-				struct v4l2_subdev_pad_config *cfg,
-#else
-				struct v4l2_subdev_state *sd_state,
-#endif
-				struct v4l2_subdev_selection *sel)
-{
-	struct vd56g3_dev *sensor = to_vd56g3_dev(sd);
-
-	switch (sel->target) {
-	case V4L2_SEL_TGT_CROP:
-		sel->r = sensor->current_mode->crop;
-		break;
-	case V4L2_SEL_TGT_NATIVE_SIZE:
-	case V4L2_SEL_TGT_CROP_DEFAULT:
-	case V4L2_SEL_TGT_CROP_BOUNDS:
-		sel->r.top = 0;
-		sel->r.left = 0;
-		sel->r.width = VD56G3_MAX_WIDTH;
-		sel->r.height = VD56G3_MAX_HEIGHT;
-		break;
-	default:
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
-/**
- * vd56g3_enum_frame_size - Callback to enumerate supported frame sizes
- * @sd: v4l2 subdevice entry point
- * @cfg: struct used for storing subdev pad information
- * @fse: pointer to struct v4l2_subdev_frame_size_enum that the driver will fill
- * with the supported frame size
- *
- * This callback enables to enumerate all frame sizes supported by a sub-device
- * on the given pad for the given media bus format.
- * It will be triggered upon the VIDIOC_SUBDEV_ENUM_FRAME_SIZE() ioctl call.
- */
-static int vd56g3_enum_frame_size(struct v4l2_subdev *sd,
-#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
-				  struct v4l2_subdev_pad_config *cfg,
-#else
-				  struct v4l2_subdev_state *sd_state,
-#endif
-				  struct v4l2_subdev_frame_size_enum *fse)
-{
-	struct vd56g3_dev *sensor = to_vd56g3_dev(sd);
-	struct i2c_client *client = sensor->i2c_client;
-
-	dev_dbg(&client->dev, "%s for index %d", __func__, fse->index);
-	if (fse->pad != 0)
-		return -EINVAL;
-	if (fse->index >= ARRAY_SIZE(vd56g3_supported_modes))
-		return -EINVAL;
-
-	fse->min_width = vd56g3_supported_modes[fse->index].width;
-	fse->max_width = fse->min_width;
-	fse->min_height = vd56g3_supported_modes[fse->index].height;
-	fse->max_height = fse->min_height;
-
-	return 0;
-}
-
-static const struct v4l2_subdev_core_ops vd56g3_core_ops = {};
-
-static const struct v4l2_subdev_video_ops vd56g3_video_ops = {
-	.s_stream = vd56g3_s_stream,
-};
-
-static const struct v4l2_subdev_pad_ops vd56g3_pad_ops = {
-	.enum_mbus_code = vd56g3_enum_mbus_code,
-	.get_fmt = vd56g3_get_fmt,
-	.set_fmt = vd56g3_set_fmt,
-	.init_cfg = vd56g3_init_cfg,
-	.get_selection = vd56g3_get_selection,
-	.enum_frame_size = vd56g3_enum_frame_size,
-};
-
-static const struct v4l2_subdev_ops vd56g3_subdev_ops = {
-	.core = &vd56g3_core_ops,
-	.video = &vd56g3_video_ops,
-	.pad = &vd56g3_pad_ops,
-};
-
-static const struct media_entity_operations vd56g3_subdev_entity_ops = {
-	.link_validate = v4l2_subdev_link_validate,
-};
 
 /**
  * DOC: V4L2 supported Controls
@@ -1659,13 +831,14 @@ static const struct media_entity_operations vd56g3_subdev_entity_ops = {
 static int vd56g3_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct v4l2_subdev *sd = ctrl_to_sd(ctrl);
-	struct vd56g3_dev *sensor = to_vd56g3_dev(sd);
+	struct vd56g3 *sensor = to_vd56g3(sd);
 	int temperature;
 	int ret;
 
 	switch (ctrl->id) {
 	case V4L2_CID_PIXEL_RATE:
-		ret = __v4l2_ctrl_s_ctrl_int64(ctrl, get_pixel_rate(sensor));
+		ret = __v4l2_ctrl_s_ctrl_int64(ctrl,
+					       vd56g3_get_pixel_rate(sensor));
 		break;
 	case V4L2_CID_TEMPERATURE:
 		ret = vd56g3_get_temp(sensor, &temperature);
@@ -1684,17 +857,17 @@ static int vd56g3_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct v4l2_subdev *sd = ctrl_to_sd(ctrl);
-	struct vd56g3_dev *sensor = to_vd56g3_dev(sd);
+	struct vd56g3 *sensor = to_vd56g3(sd);
 	unsigned int expo_max;
 	int ret;
 
 	switch (ctrl->id) {
 	case V4L2_CID_VFLIP:
 	case V4L2_CID_HFLIP:
-		ret = vd56g3_write_reg(sensor, VD56G3_REG_ORIENTATION,
-				       sensor->hflip_ctrl->val |
-					       (sensor->vflip_ctrl->val << 1),
-				       NULL);
+		ret = vd56g3_write(sensor, VD56G3_REG_ORIENTATION,
+				   sensor->hflip_ctrl->val |
+					   (sensor->vflip_ctrl->val << 1),
+				   NULL);
 		break;
 	case V4L2_CID_TEST_PATTERN:
 		ret = vd56g3_update_patgen(sensor, ctrl->val);
@@ -1715,9 +888,10 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 		ret = vd56g3_lock_exposure(sensor, ctrl->val);
 		break;
 	case V4L2_CID_AUTO_EXPOSURE_BIAS:
-		ret = vd56g3_write_reg(
+		ret = vd56g3_write(
 			sensor, VD56G3_REG_AE_COMPENSATION,
-			DIV_ROUND_CLOSEST((int)ev_bias_qmenu[ctrl->val] * 256,
+			DIV_ROUND_CLOSEST((int)vd56g3_ev_bias_qmenu[ctrl->val] *
+						  256,
 					  1000),
 			NULL);
 		break;
@@ -1740,29 +914,29 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 			sensor, ctrl->val, ctrl->id - V4L2_CID_GPIO0_MODE);
 		break;
 	case V4L2_CID_AE_TARGET_PERCENTAGE:
-		ret = vd56g3_write_reg(sensor, VD56G3_REG_AE_TARGET_PERCENTAGE,
-				       ctrl->val, NULL);
+		ret = vd56g3_write(sensor, VD56G3_REG_AE_TARGET_PERCENTAGE,
+				   ctrl->val, NULL);
 		break;
 	case V4L2_CID_AE_CONTROL_MODE:
-		ret = vd56g3_write_reg(sensor, VD56G3_REG_AE_COMPILER_CONTROL,
-				       sensor->ae_flicker_freq_ctrl->val << 1 |
-					       ctrl->val,
-				       NULL);
+		ret = vd56g3_write(sensor, VD56G3_REG_AE_COMPILER_CONTROL,
+				   sensor->ae_flicker_freq_ctrl->val << 1 |
+					   ctrl->val,
+				   NULL);
 		break;
 	case V4L2_CID_AE_CONTROL_FLICKER_FREQ:
-		ret = vd56g3_write_reg(
+		ret = vd56g3_write(
 			sensor, VD56G3_REG_AE_COMPILER_CONTROL,
 			ctrl->val << 1 | sensor->ae_ctrl_mode_ctrl->val, NULL);
 		break;
 	case V4L2_CID_AE_STEP_PROPORTION:
-		ret = vd56g3_write_reg(sensor, VD56G3_REG_AE_STEP_PROPORTION,
-				       DIV_ROUND_CLOSEST(ctrl->val * 256, 100),
-				       NULL);
+		ret = vd56g3_write(sensor, VD56G3_REG_AE_STEP_PROPORTION,
+				   DIV_ROUND_CLOSEST(ctrl->val * 256, 100),
+				   NULL);
 		break;
 	case V4L2_CID_AE_LEAK_PROPORTION:
-		ret = vd56g3_write_reg(
-			sensor, VD56G3_REG_AE_LEAK_PROPORTION,
-			DIV_ROUND_CLOSEST(ctrl->val * 32768, 1000), NULL);
+		ret = vd56g3_write(sensor, VD56G3_REG_AE_LEAK_PROPORTION,
+				   DIV_ROUND_CLOSEST(ctrl->val * 32768, 1000),
+				   NULL);
 		break;
 	default:
 		ret = -EINVAL;
@@ -1776,8 +950,6 @@ static const struct v4l2_ctrl_ops vd56g3_ctrl_ops = {
 	.g_volatile_ctrl = vd56g3_g_volatile_ctrl,
 	.s_ctrl = vd56g3_s_ctrl,
 };
-
-/* FIXME: better add a macro here ? */
 
 /**
  * DOC: GPIO0 mode selection Control
@@ -2078,7 +1250,497 @@ static const struct v4l2_ctrl_config vd56g3_ae_leak_prop_ctrl = {
 	.step		= 1
 };
 
-static int vd56g3_init_controls(struct vd56g3_dev *sensor)
+/**
+ * DOC: V4L2 exposed Operations
+ *
+ * **This sections contains all vd56g3 operations exposed through standard V4L2 API**
+ *
+ * See below the supported callbacks (categorized following V4L2 classification):
+ *
+ * - ``v4l2_subdev_core_ops``. **core ops** callbacks for subdev
+ *
+ *      + no callback defined here
+ *
+ * - ``v4l2_subdev_video_ops``: **video-related** callbacks
+ *
+ *      + vd56g3_s_stream(). V4L2 notification that a video stream will start or has stopped.
+ *
+ * - ``v4l2_subdev_pad_ops``: **pad-level** callbacks
+ *
+ *      + vd56g3_enum_mbus_code(). Callback to enumerate available media bus formats
+ *      + vd56g3_get_fmt() - Callback to get the frame format of specific subdev pads
+ *      + vd56g3_set_fmt() - Callback to set a given frame format
+ *      + vd56g3_enum_frame_size(). Callback to enumerate supported frame sizes
+ */
+
+/* ----------------------------------------------------------------------------
+ * Videos ops
+ */
+
+static int vd56g3_stream_enable(struct vd56g3 *sensor)
+{
+	const struct v4l2_rect *crop = &sensor->current_mode->crop;
+	int is_isl = sensor->current_mode->is_isl;
+	int ret = 0;
+
+	/* configure output mode */
+	vd56g3_write(sensor, VD56G3_REG_FORMAT_CTRL,
+		     vd56g3_get_bpp(sensor->fmt.code), &ret);
+	vd56g3_write(sensor, VD56G3_REG_OIF_IMG_CTRL,
+		     vd56g3_get_datatype(sensor->fmt.code), &ret);
+	vd56g3_write(sensor, VD56G3_REG_OIF_ISL_CTRL,
+		     is_isl ? vd56g3_get_datatype(sensor->fmt.code) : 0x12,
+		     &ret);
+	vd56g3_write(sensor, VD56G3_REG_ISL_ENABLE, is_isl, &ret);
+
+	/* configure size and bin mode */
+	vd56g3_write(sensor, VD56G3_REG_READOUT_CTRL,
+		     sensor->current_mode->bin_mode, &ret);
+	vd56g3_write(sensor, VD56G3_REG_OUT_ROI_X_START, crop->left, &ret);
+	vd56g3_write(sensor, VD56G3_REG_OUT_ROI_X_END,
+		     crop->left + crop->width - 1, &ret);
+	vd56g3_write(sensor, VD56G3_REG_OUT_ROI_Y_START, crop->top, &ret);
+	vd56g3_write(sensor, VD56G3_REG_OUT_ROI_Y_END,
+		     crop->top + crop->height - 1, &ret);
+	if (ret)
+		return ret;
+
+	/* configure framelength / framerate */
+	ret = vd56g3_apply_framelength(sensor);
+	if (ret)
+		return ret;
+
+	/* apply exposure */
+	ret = vd56g3_write(sensor, VD56G3_REG_MANUAL_COARSE_EXPOSURE,
+			   sensor->manual_expo, NULL);
+	if (ret)
+		return ret;
+
+	/* apply gains */
+	ret = vd56g3_write(sensor, VD56G3_REG_MANUAL_ANALOG_GAIN,
+			   sensor->analog_gain, NULL);
+	if (ret)
+		return ret;
+	ret = vd56g3_write(sensor, VD56G3_REG_MANUAL_DIGITAL_GAIN,
+			   sensor->digital_gain, NULL);
+	if (ret)
+		return ret;
+
+	/* start streaming */
+	ret = vd56g3_write(sensor, VD56G3_REG_STBY, VD56G3_CMD_START_STREAM,
+			   NULL);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_poll_reg(sensor, VD56G3_REG_STBY, VD56G3_CMD_ACK);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_STREAMING);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+static int vd56g3_stream_disable(struct vd56g3 *sensor)
+{
+	int ret;
+
+	ret = vd56g3_write(sensor, VD56G3_REG_STREAMING, VD56G3_CMD_STOP_STREAM,
+			   NULL);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_poll_reg(sensor, VD56G3_REG_STREAMING, VD56G3_CMD_ACK);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+/**
+ * vd56g3_s_stream - Callback notifying the streaming start
+ * @sd: v4l2 subdevice entry point
+ * @enable: enable or disable stream
+ */
+static int vd56g3_s_stream(struct v4l2_subdev *sd, int enable)
+{
+	struct vd56g3 *sensor = to_vd56g3(sd);
+	int ret = 0;
+
+	mutex_lock(&sensor->lock);
+	if (sensor->streaming == enable) {
+		mutex_unlock(&sensor->lock);
+		return 0;
+	}
+
+	ret = enable ? vd56g3_stream_enable(sensor) :
+		       vd56g3_stream_disable(sensor);
+	if (!ret)
+		sensor->streaming = enable;
+	mutex_unlock(&sensor->lock);
+
+	/* h/v flips locked during streaming */
+	v4l2_ctrl_grab(sensor->hflip_ctrl, enable);
+	v4l2_ctrl_grab(sensor->vflip_ctrl, enable);
+
+	return ret;
+}
+
+static const struct v4l2_subdev_video_ops vd56g3_video_ops = {
+	.s_stream = vd56g3_s_stream,
+};
+
+/* ----------------------------------------------------------------------------
+ * Pad ops
+ */
+
+/* Media bus code is dependant of :
+ *      - 8bits or 10bits output
+ *      - variant : Mono or RGB
+ *      - H/V flips parameters in case of RGB
+ */
+static u32 vd56g3_get_mbus_code(struct vd56g3 *sensor, u32 code)
+{
+	unsigned int i_bpp;
+	unsigned int j;
+
+	for (i_bpp = 0; i_bpp < ARRAY_SIZE(vd56g3_mbus_codes); i_bpp++) {
+		for (j = 0; j < ARRAY_SIZE(vd56g3_mbus_codes[i_bpp]); j++) {
+			if (vd56g3_mbus_codes[i_bpp][j] == code)
+				goto endloops;
+		}
+	}
+
+endloops:
+	if (i_bpp >= ARRAY_SIZE(vd56g3_mbus_codes))
+		i_bpp = 0;
+
+	if (!sensor->is_rgb)
+		j = 0;
+	else
+		j = 1 + (sensor->hflip_ctrl->val ? 1 : 0) +
+		    (sensor->vflip_ctrl->val ? 2 : 0);
+
+	return vd56g3_mbus_codes[i_bpp][j];
+}
+
+/**
+ * vd56g3_enum_mbus_code - Callback to enumerate available media bus formats
+ * @sd: v4l2 subdevice entry point
+ * @cfg: struct used for storing subdev pad information
+ * @code: pointer to struct v4l2_subdev_mbus_code_enum that the driver will fill
+ * with the available mbus format
+ *
+ * This callback enables to enumerate media bus formats available at a given
+ * sub-device pad. It will be triggered upon the VIDIOC_SUBDEV_ENUM_MBUS_CODE()
+ * ioctl call.
+ */
+static int vd56g3_enum_mbus_code(struct v4l2_subdev *sd,
+#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+				 struct v4l2_subdev_pad_config *cfg,
+#else
+				 struct v4l2_subdev_state *sd_state,
+#endif
+				 struct v4l2_subdev_mbus_code_enum *code)
+{
+	struct vd56g3 *sensor = to_vd56g3(sd);
+
+	if (code->index >= ARRAY_SIZE(vd56g3_mbus_codes))
+		return -EINVAL;
+
+	code->code =
+		vd56g3_get_mbus_code(sensor, vd56g3_mbus_codes[code->index][0]);
+
+	return 0;
+}
+
+/**
+ * vd56g3_enum_frame_size - Callback to enumerate supported frame sizes
+ * @sd: v4l2 subdevice entry point
+ * @cfg: struct used for storing subdev pad information
+ * @fse: pointer to struct v4l2_subdev_frame_size_enum that the driver will fill
+ * with the supported frame size
+ *
+ * This callback enables to enumerate all frame sizes supported by a sub-device
+ * on the given pad for the given media bus format.
+ * It will be triggered upon the VIDIOC_SUBDEV_ENUM_FRAME_SIZE() ioctl call.
+ */
+static int vd56g3_enum_frame_size(struct v4l2_subdev *sd,
+#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+				  struct v4l2_subdev_pad_config *cfg,
+#else
+				  struct v4l2_subdev_state *sd_state,
+#endif
+				  struct v4l2_subdev_frame_size_enum *fse)
+{
+	struct vd56g3 *sensor = to_vd56g3(sd);
+	struct i2c_client *client = sensor->i2c_client;
+
+	dev_dbg(&client->dev, "%s for index %d", __func__, fse->index);
+	if (fse->pad != 0)
+		return -EINVAL;
+	if (fse->index >= ARRAY_SIZE(vd56g3_supported_modes))
+		return -EINVAL;
+
+	fse->min_width = vd56g3_supported_modes[fse->index].width;
+	fse->max_width = fse->min_width;
+	fse->min_height = vd56g3_supported_modes[fse->index].height;
+	fse->max_height = fse->min_height;
+
+	return 0;
+}
+
+/**
+ * vd56g3_get_fmt - Callback to get the frame format of specific subdev pads
+ * @sd: v4l2 subdevice entry point
+ * @cfg: struct used for storing subdev pad information
+ * @format: the v4l2_subdev_format struct for which format field will be filled
+ * by the driver
+ *
+ * This callback enables to retrieve the frame format.
+ * It will be triggered upon the VIDIOC_SUBDEV_G_FMT() ioctl call.
+ */
+static int vd56g3_get_fmt(struct v4l2_subdev *sd,
+#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+			  struct v4l2_subdev_pad_config *cfg,
+#else
+			  struct v4l2_subdev_state *sd_state,
+#endif
+			  struct v4l2_subdev_format *format)
+{
+	struct vd56g3 *sensor = to_vd56g3(sd);
+	struct i2c_client *client = sensor->i2c_client;
+	struct v4l2_mbus_framefmt *mbus_fmt;
+
+	dev_dbg(&client->dev, "%s probe %d", __func__, format->pad);
+	if (format->pad != 0)
+		return -EINVAL;
+
+	mutex_lock(&sensor->lock);
+
+	if (format->which == V4L2_SUBDEV_FORMAT_TRY)
+#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+		mbus_fmt = v4l2_subdev_get_try_format(&sensor->sd, cfg,
+						      format->pad);
+#else
+		mbus_fmt = v4l2_subdev_get_try_format(&sensor->sd, sd_state,
+						      format->pad);
+#endif
+	else
+		mbus_fmt = &sensor->fmt;
+
+	mbus_fmt->code = vd56g3_get_mbus_code(sensor, mbus_fmt->code);
+	format->format = *mbus_fmt;
+
+	mutex_unlock(&sensor->lock);
+
+	return 0;
+}
+
+static int vd56g3_try_fmt_internal(struct v4l2_subdev *sd,
+				   struct v4l2_mbus_framefmt *fmt,
+				   const struct vd56g3_mode **new_mode)
+{
+	const struct vd56g3_mode *mode = vd56g3_supported_modes;
+	struct vd56g3 *sensor = to_vd56g3(sd);
+	unsigned int i;
+
+	/* select code */
+	fmt->code = vd56g3_get_mbus_code(sensor, fmt->code);
+
+	/* select size */
+	for (i = 0; i < ARRAY_SIZE(vd56g3_supported_modes); i++) {
+		if (mode->width <= fmt->width && mode->height <= fmt->height)
+			break;
+		mode++;
+	}
+	if (i == ARRAY_SIZE(vd56g3_supported_modes))
+		mode--;
+
+	*new_mode = mode;
+	fmt->width = mode->width;
+	fmt->height = mode->height;
+	fmt->colorspace = V4L2_COLORSPACE_RAW;
+	fmt->field = V4L2_FIELD_NONE;
+	fmt->ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
+	fmt->quantization = V4L2_QUANTIZATION_DEFAULT;
+	fmt->xfer_func = V4L2_XFER_FUNC_DEFAULT;
+
+	return 0;
+}
+
+/**
+ * vd56g3_set_fmt - Callback to set a given frame format
+ * @sd: v4l2 subdevice entry point
+ * @cfg: struct used for storing subdev pad information
+ * @format: the format to set
+ *
+ * This callback enables to change the format with the given @format value.
+ * It will be triggered upon the VIDIOC_SUBDEV_S_FMT() ioctl call.
+ */
+static int vd56g3_set_fmt(struct v4l2_subdev *sd,
+#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+			  struct v4l2_subdev_pad_config *cfg,
+#else
+			  struct v4l2_subdev_state *sd_state,
+#endif
+			  struct v4l2_subdev_format *format)
+{
+	struct vd56g3 *sensor = to_vd56g3(sd);
+	struct i2c_client *client = sensor->i2c_client;
+	const struct vd56g3_mode *new_mode;
+	struct v4l2_mbus_framefmt *fmt;
+	unsigned int expo_max;
+	int ret;
+
+	if (format->pad != 0)
+		return -EINVAL;
+
+	dev_dbg(&client->dev, "%s %dx%d", __func__, format->format.width,
+		format->format.height);
+
+	mutex_lock(&sensor->lock);
+
+	if (sensor->streaming) {
+		ret = -EBUSY;
+		goto out;
+	}
+
+	/* find best format */
+	ret = vd56g3_try_fmt_internal(sd, &format->format, &new_mode);
+	if (ret)
+		goto out;
+
+	if (format->which == V4L2_SUBDEV_FORMAT_TRY) {
+#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+		fmt = v4l2_subdev_get_try_format(sd, cfg, 0);
+#else
+		fmt = v4l2_subdev_get_try_format(sd, sd_state, 0);
+#endif
+		*fmt = format->format;
+	} else if (sensor->current_mode != new_mode ||
+		   sensor->fmt.code != format->format.code) {
+		// TODO : this nested 'if' shouldn't be necessary
+		// however it prevents unwanted behavior with qv4l2
+		sensor->fmt = format->format;
+		sensor->current_mode = new_mode;
+
+		/* Update pixelrate, blanking and exposure */
+		__v4l2_ctrl_s_ctrl_int64(sensor->pixel_rate_ctrl,
+					 vd56g3_get_pixel_rate(sensor));
+		ret = vd56g3_update_vblank(sensor,
+					   VD56G3_FRAME_LENGTH_DEF_60FPS -
+						   new_mode->crop.height);
+		if (ret)
+			goto out;
+		__v4l2_ctrl_modify_range(sensor->vblank_ctrl,
+					 sensor->vblank_min,
+					 0xffff - new_mode->crop.height, 1,
+					 sensor->vblank);
+		// todo : isn't it redundant ?
+		__v4l2_ctrl_s_ctrl(sensor->vblank_ctrl, sensor->vblank);
+		expo_max = sensor->frame_length - VD56G3_EXPOSURE_OFFSET;
+		__v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max, 1,
+					 VD56G3_EXPOSURE_DEFAULT);
+	}
+
+out:
+	mutex_unlock(&sensor->lock);
+
+	return ret;
+}
+
+static int vd56g3_get_selection(struct v4l2_subdev *sd,
+#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+				struct v4l2_subdev_pad_config *cfg,
+#else
+				struct v4l2_subdev_state *sd_state,
+#endif
+				struct v4l2_subdev_selection *sel)
+{
+	struct vd56g3 *sensor = to_vd56g3(sd);
+
+	switch (sel->target) {
+	case V4L2_SEL_TGT_CROP:
+		sel->r = sensor->current_mode->crop;
+		break;
+	case V4L2_SEL_TGT_NATIVE_SIZE:
+	case V4L2_SEL_TGT_CROP_DEFAULT:
+	case V4L2_SEL_TGT_CROP_BOUNDS:
+		sel->r.top = 0;
+		sel->r.left = 0;
+		sel->r.width = VD56G3_MAX_WIDTH;
+		sel->r.height = VD56G3_MAX_HEIGHT;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int vd56g3_init_cfg(struct v4l2_subdev *sd,
+#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+			   struct v4l2_subdev_pad_config *cfg)
+#else
+			   struct v4l2_subdev_state *sd_state)
+#endif
+{
+	struct vd56g3 *sensor = to_vd56g3(sd);
+	struct v4l2_subdev_format fmt = { 0 };
+
+	// Default to native resolution mode
+	sensor->current_mode = &vd56g3_supported_modes[0];
+
+#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+	fmt.which = cfg ? V4L2_SUBDEV_FORMAT_TRY : V4L2_SUBDEV_FORMAT_ACTIVE;
+#else
+	fmt.which = sd_state ? V4L2_SUBDEV_FORMAT_TRY :
+			       V4L2_SUBDEV_FORMAT_ACTIVE;
+#endif
+
+	fmt.format.width = sensor->current_mode->width;
+	fmt.format.height = sensor->current_mode->height;
+
+#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+	return vd56g3_set_fmt(sd, cfg, &fmt);
+#else
+	return vd56g3_set_fmt(sd, sd_state, &fmt);
+#endif
+}
+
+static const struct v4l2_subdev_core_ops vd56g3_core_ops = {};
+
+static const struct v4l2_subdev_pad_ops vd56g3_pad_ops = {
+	.init_cfg = vd56g3_init_cfg,
+	.enum_mbus_code = vd56g3_enum_mbus_code,
+	.enum_frame_size = vd56g3_enum_frame_size,
+	.get_fmt = vd56g3_get_fmt,
+	.set_fmt = vd56g3_set_fmt,
+	.get_selection = vd56g3_get_selection,
+};
+
+static const struct v4l2_subdev_ops vd56g3_subdev_ops = {
+	.core = &vd56g3_core_ops,
+	.video = &vd56g3_video_ops,
+	.pad = &vd56g3_pad_ops,
+};
+
+static const struct media_entity_operations vd56g3_subdev_entity_ops = {
+	.link_validate = v4l2_subdev_link_validate,
+};
+
+/* ----------------------------------------------------------------------------
+ * Probe and initialization
+ */
+
+static int vd56g3_init_controls(struct vd56g3 *sensor)
 {
 	const struct v4l2_ctrl_ops *ops = &vd56g3_ctrl_ops;
 	struct v4l2_ctrl_handler *hdl = &sensor->ctrl_handler;
@@ -2105,11 +1767,12 @@ static int vd56g3_init_controls(struct vd56g3_dev *sensor)
 	/* add V4L2_CID_PIXEL_RATE */
 	sensor->pixel_rate_ctrl =
 		v4l2_ctrl_new_std(hdl, ops, V4L2_CID_PIXEL_RATE, 1, INT_MAX, 1,
-				  get_pixel_rate(sensor));
+				  vd56g3_get_pixel_rate(sensor));
 	// TODO : no more V4L2_CTRL_FLAG_VOLATILE ?
 	sensor->pixel_rate_ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 	ctrl = v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_LINK_FREQ,
-				      ARRAY_SIZE(link_freq) - 1, 0, link_freq);
+				      ARRAY_SIZE(vd56g3_link_freq) - 1, 0,
+				      vd56g3_link_freq);
 	ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 	/* add V4L2_CID_EXPOSURE_AUTO */
 	v4l2_ctrl_new_std_menu(hdl, ops, V4L2_CID_EXPOSURE_AUTO, 1, ~0x3,
@@ -2132,9 +1795,9 @@ static int vd56g3_init_controls(struct vd56g3_dev *sensor)
 	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_3A_LOCK, 0, 7, 0, 0);
 	/* V4L2_CID_AUTO_EXPOSURE_BIAS */
 	v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_AUTO_EXPOSURE_BIAS,
-			       ARRAY_SIZE(ev_bias_qmenu) - 1,
-			       (ARRAY_SIZE(ev_bias_qmenu) + 1) / 2 - 1,
-			       ev_bias_qmenu);
+			       ARRAY_SIZE(vd56g3_ev_bias_qmenu) - 1,
+			       (ARRAY_SIZE(vd56g3_ev_bias_qmenu) + 1) / 2 - 1,
+			       vd56g3_ev_bias_qmenu);
 	/* Blanking controls (and related)*/
 	ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HBLANK, 0,
 				 sensor->line_length, 1,
@@ -2177,11 +1840,364 @@ free_ctrls:
 	return ret;
 }
 
+static int vd56g3_rx_from_ep(struct vd56g3 *sensor,
+			     struct fwnode_handle *endpoint)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	struct v4l2_fwnode_endpoint *ep;
+	u32 log2phy[3] = { ~0, ~0, ~0 };
+	u32 phy2log[3] = { ~0, ~0, ~0 };
+	int polarities[3] = { 0, 0, 0 };
+	int l_nb;
+	int p, l;
+	int i;
+
+#if KERNEL_VERSION(4, 20, 0) >= LINUX_VERSION_CODE
+	ep = v4l2_fwnode_endpoint_alloc_parse(endpoint);
+	if (IS_ERR(ep))
+		return -EINVAL;
+#else
+	struct v4l2_fwnode_endpoint ep_node = { .bus_type =
+							V4L2_MBUS_CSI2_DPHY };
+	int ret;
+
+	ep = &ep_node;
+	ret = v4l2_fwnode_endpoint_alloc_parse(endpoint, ep);
+	if (ret)
+		return -EINVAL;
+#endif
+
+	l_nb = ep->bus.mipi_csi2.num_data_lanes;
+	if (l_nb != 1 && l_nb != 2) {
+		dev_err(&client->dev, "invalid data lane number %d\n", l_nb);
+		goto error_ep;
+	}
+
+	/* build  log2phy, phy2log and polarities from ep info */
+	log2phy[0] = ep->bus.mipi_csi2.clock_lane;
+	phy2log[log2phy[0]] = 0;
+	for (l = 1; l < l_nb + 1; l++) {
+		log2phy[l] = ep->bus.mipi_csi2.data_lanes[l - 1];
+		phy2log[log2phy[l]] = l;
+	}
+	/*
+	 * then fill remaining slots for every physical slot have something
+	 * valid for hardware stuff.
+	 */
+	for (p = 0; p < 3; p++) {
+		if (phy2log[p] != ~0)
+			continue;
+		phy2log[p] = l;
+		log2phy[l] = p;
+		l++;
+	}
+	for (l = 0; l < l_nb + 1; l++)
+		polarities[l] = ep->bus.mipi_csi2.lane_polarities[l];
+
+	if (log2phy[0] != 0) {
+		dev_err(&client->dev,
+			"clk lane must be map to physical lane 0\n");
+		goto error_ep;
+	}
+	sensor->oif_ctrl = l_nb | (polarities[0] << 3) |
+			   ((phy2log[1] - 1) << 4) | (polarities[1] << 6) |
+			   ((phy2log[2] - 1) << 7) | (polarities[2] << 9);
+	sensor->nb_of_lane = l_nb;
+
+	dev_dbg(&client->dev, "rx use %d lanes", l_nb);
+	for (i = 0; i < 3; i++) {
+		dev_dbg(&client->dev, "log2phy[%d] = %d", i, log2phy[i]);
+		dev_dbg(&client->dev, "phy2log[%d] = %d", i, phy2log[i]);
+		dev_dbg(&client->dev, "polarity[%d] = %d", i, polarities[i]);
+	}
+	dev_dbg(&client->dev, "oif_ctrl = 0x%04x\n", sensor->oif_ctrl);
+
+	v4l2_fwnode_endpoint_free(ep);
+
+	return 0;
+
+error_ep:
+	v4l2_fwnode_endpoint_free(ep);
+	return -EINVAL;
+}
+
+static int vd56g3_get_regulators(struct vd56g3 *sensor)
+{
+	int i;
+
+	for (i = 0; i < VD56G3_NUM_SUPPLIES; i++)
+		sensor->supplies[i].supply = vd56g3_supply_names[i];
+
+	return devm_regulator_bulk_get(&sensor->i2c_client->dev,
+				       VD56G3_NUM_SUPPLIES, sensor->supplies);
+}
+
+static void vd56g3_apply_reset(struct vd56g3 *sensor)
+{
+	gpiod_set_value_cansleep(sensor->reset_gpio, 0);
+	usleep_range(5000, 10000);
+	gpiod_set_value_cansleep(sensor->reset_gpio, 1);
+	usleep_range(5000, 10000);
+	gpiod_set_value_cansleep(sensor->reset_gpio, 0);
+	usleep_range(5000, 10000);
+}
+
+static int vd56g3_detect(struct vd56g3 *sensor)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	int id = 0;
+	int device_revision = 0;
+	int ret;
+
+	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_READY_TO_BOOT);
+	if (ret)
+		return ret;
+
+	id = vd56g3_read(sensor, VD56G3_REG_MODEL_ID);
+	if (id < 0)
+		return id;
+
+	if (id != VD56G3_MODEL_ID) {
+		dev_warn(&client->dev, "Unsupported sensor id %x", id);
+		return -ENODEV;
+	}
+
+	device_revision = vd56g3_read(sensor, VD56G3_REG_REVISION);
+	if (device_revision < 0)
+		return device_revision;
+
+	if ((device_revision >> 8) != 0x20) {
+		dev_warn(&client->dev, "Unsupported Cut version %x",
+			 device_revision);
+		return -ENODEV;
+	}
+
+	return 0;
+}
+
+static int vd56g3_patch(struct vd56g3 *sensor)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	const u8 *patch = patch_cut2;
+	int patch_size = sizeof(patch_cut2);
+	u8 patch_major;
+	u8 patch_minor;
+	int cur_patch_rev;
+	int ret;
+
+	patch_major = patch[3];
+	patch_minor = patch[2];
+
+	ret = vd56g3_write_array(sensor, 0x2000, patch_size, patch);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_write(sensor, VD56G3_REG_BOOT, VD56G3_CMD_PATCH_SETUP,
+			   NULL);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_poll_reg(sensor, VD56G3_REG_BOOT, VD56G3_CMD_ACK);
+	if (ret)
+		return ret;
+
+	cur_patch_rev = vd56g3_read(sensor, VD56G3_REG_FWPATCH_REVISION);
+	if (cur_patch_rev < 0)
+		return cur_patch_rev;
+
+	if (cur_patch_rev != (patch_major << 8) + patch_minor) {
+		dev_err(&client->dev,
+			"bad patch version expected %d.%d got %d.%d",
+			patch_major, patch_minor, cur_patch_rev >> 8,
+			cur_patch_rev & 0xff);
+		return -ENODEV;
+	}
+	dev_info(&client->dev, "patch %d.%d applied", cur_patch_rev >> 8,
+		 cur_patch_rev & 0xff);
+
+	return 0;
+}
+
+static int vd56g3_boot(struct vd56g3 *sensor)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	int ret;
+
+	ret = vd56g3_write(sensor, VD56G3_REG_BOOT, VD56G3_CMD_BOOT, NULL);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_poll_reg(sensor, VD56G3_REG_BOOT, VD56G3_CMD_ACK);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY);
+	if (ret)
+		return ret;
+
+	dev_info(&client->dev, "sensor boot successfully");
+
+	return 0;
+}
+
+static int vd56g3_vtpatch(struct vd56g3 *sensor)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	int i;
+	int vtpatch_offset = 0;
+	int cur_vtpatch_rd_rev, cur_vtpatch_gr_rev, cur_vtpatch_gt_rev;
+	int ret = 0;
+
+	ret = vd56g3_write(sensor, VD56G3_REG_VTPATCHING,
+			   VD56G3_CMD_START_VTRAM_UPDATE, NULL);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_poll_reg(sensor, VD56G3_REG_VTPATCHING, VD56G3_CMD_ACK);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY);
+	if (ret)
+		return ret;
+
+	for (i = 0; i < vtpatch_area_nb; i++) {
+		ret = vd56g3_write_array(sensor, vtpatch_desc[i].offset,
+					 vtpatch_desc[i].size,
+					 vtpatch + vtpatch_offset);
+		if (ret)
+			return ret;
+
+		vtpatch_offset += vtpatch_desc[i].size;
+	}
+	// TODO replace with correct register names
+	vd56g3_write(sensor, VD56G3_REG_8BIT(0xd9f8), VT_REVISION, &ret);
+	vd56g3_write(sensor, VD56G3_REG_8BIT(0xaffc), VT_REVISION, &ret);
+	vd56g3_write(sensor, VD56G3_REG_8BIT(0xbbb4), VT_REVISION, &ret);
+	vd56g3_write(sensor, VD56G3_REG_8BIT(0xb898), VT_REVISION, &ret);
+
+	vd56g3_write(sensor, VD56G3_REG_VTPATCHING, VD56G3_CMD_END_VTRAM_UPDATE,
+		     &ret);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_poll_reg(sensor, VD56G3_REG_VTPATCHING, VD56G3_CMD_ACK);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY);
+	if (ret)
+		return ret;
+
+	cur_vtpatch_rd_rev =
+		vd56g3_read(sensor, VD56G3_REG_VTIMING_RD_REVISION);
+	if (cur_vtpatch_rd_rev < 0)
+		return cur_vtpatch_rd_rev;
+	cur_vtpatch_gr_rev =
+		vd56g3_read(sensor, VD56G3_REG_VTIMING_GR_REVISION);
+	if (cur_vtpatch_gr_rev < 0)
+		return cur_vtpatch_gr_rev;
+	cur_vtpatch_gt_rev =
+		vd56g3_read(sensor, VD56G3_REG_VTIMING_GT_REVISION);
+	if (cur_vtpatch_gt_rev < 0)
+		return cur_vtpatch_gt_rev;
+
+	if (cur_vtpatch_rd_rev != VT_REVISION ||
+	    cur_vtpatch_gr_rev != VT_REVISION ||
+	    cur_vtpatch_gt_rev != VT_REVISION) {
+		dev_err(&client->dev,
+			"bad vtpatch version, expected %d got rd:%d, gr:%d gt:%d",
+			VT_REVISION, cur_vtpatch_rd_rev, cur_vtpatch_gr_rev,
+			cur_vtpatch_gt_rev);
+		return -ENODEV;
+	}
+	dev_info(&client->dev, "VT patch %d applied", VT_REVISION);
+
+	return 0;
+}
+
+static void vd56g3_get_pll_parameters(u32 freq, unsigned int *prediv,
+				      unsigned int *mult)
+{
+	const unsigned int predivs[] = { 1, 2, 4 };
+	int i;
+
+	/*
+	 * freq range is [6Mhz-27Mhz] already checked.
+	 * output of divider should be in [6Mhz-12Mhz[.
+	 */
+	for (i = 0; i < ARRAY_SIZE(predivs); i++) {
+		*prediv = predivs[i];
+		if (freq / *prediv < 12 * HZ_PER_MHZ)
+			break;
+	}
+	WARN_ON(i == ARRAY_SIZE(predivs));
+
+	/*
+	 * target freq is 804Mhz. Don't change this as it will impact image
+	 * quality.
+	 */
+	*mult = ((804 * HZ_PER_MHZ) * (*prediv) + freq / 2) / freq;
+}
+
+static int vd56g3_configure(struct vd56g3 *sensor)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	unsigned int prediv;
+	unsigned int mult;
+	unsigned int i;
+	int line_length;
+	int optical_rev;
+	int ret = 0;
+
+	vd56g3_get_pll_parameters(sensor->clk_freq, &prediv, &mult);
+	/* cache line_length value */
+	line_length = vd56g3_read(sensor, VD56G3_REG_LINE_LENGTH);
+	if (line_length < 0)
+		return line_length;
+	sensor->line_length = line_length;
+	/* configure clocks */
+	vd56g3_write(sensor, VD56G3_REG_EXT_CLOCK, sensor->clk_freq, &ret);
+	vd56g3_write(sensor, VD56G3_REG_CLK_PLL_PREDIV, prediv, &ret);
+	vd56g3_write(sensor, VD56G3_REG_CLK_SYS_PLL_MULT, mult, &ret);
+
+	/* configure interface */
+	vd56g3_write(sensor, VD56G3_REG_OIF_CTRL, sensor->oif_ctrl, &ret);
+	vd56g3_write(sensor, VD56G3_REG_OIF_CSI_BITRATE, 804, &ret);
+	vd56g3_write(sensor, VD56G3_REG_ISL_ENABLE, 0, &ret);
+
+	/* use auto expo by default */
+	vd56g3_write(sensor, VD56G3_REG_EXP_MODE, VD56G3_EXP_MODE_AUTO, &ret);
+
+	/* gpios in input (disabled) by default */
+	for (i = 0; i < 8; i++)
+		vd56g3_write(sensor, VD56G3_REG_GPIO_0_CTRL + i, 0x01, &ret);
+
+	if (ret)
+		return ret;
+
+	sensor->data_rate_in_mbps = (mult * sensor->clk_freq) / prediv;
+	sensor->pclk = (sensor->data_rate_in_mbps * 2) / 10;
+	dev_dbg(&client->dev, "clock prediv = %d", prediv);
+	dev_dbg(&client->dev, "clock mult = %d", mult);
+	dev_info(&client->dev, "data rate = %d mbps",
+		 sensor->data_rate_in_mbps);
+
+	// TODO : move to a "better" place ?
+	optical_rev = vd56g3_read(sensor, VD56G3_REG_OPTICAL_REVISION);
+	if (optical_rev < 0)
+		return optical_rev;
+
+	sensor->is_rgb = ((optical_rev & 1) == 1);
+
+	return 0;
+}
+
 static int vd56g3_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct fwnode_handle *handle;
-	struct vd56g3_dev *sensor;
+	struct vd56g3 *sensor;
 	int ret;
 
 	sensor = devm_kzalloc(dev, sizeof(*sensor), GFP_KERNEL);
@@ -2297,9 +2313,10 @@ static int vd56g3_probe(struct i2c_client *client)
 	}
 
 	// TODO : drop if possible
-	// Preset sensor internal to avoid NULL reference while calling vd56g3_init_controls()
+	// Preset sensor internal to avoid NULL reference while calling
+	// vd56g3_init_controls()
 	sensor->current_mode = &vd56g3_supported_modes[0];
-	sensor->fmt.code = mbus_codes[0][0];
+	sensor->fmt.code = vd56g3_mbus_codes[0][0];
 	ret = vd56g3_update_vblank(sensor,
 				   VD56G3_FRAME_LENGTH_DEF_60FPS -
 					   sensor->current_mode->crop.height);
@@ -2314,7 +2331,9 @@ static int vd56g3_probe(struct i2c_client *client)
 		goto disable_clock;
 	}
 
-	// TODO : temporary after vd56g3_init_controls() because at the end init_cfg make call of set_fmt which update existing controls (thus may have been initialized first)
+	// TODO : temporary after vd56g3_init_controls() because at the end
+	// init_cfg make call of set_fmt which update existing controls (thus
+	// may have been initialized first)
 	ret = vd56g3_init_cfg(&sensor->sd, NULL);
 	if (ret) {
 		dev_err(&client->dev, "Init config failed %d", ret);
@@ -2344,7 +2363,7 @@ entity_cleanup:
 static int vd56g3_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
-	struct vd56g3_dev *sensor = to_vd56g3_dev(sd);
+	struct vd56g3 *sensor = to_vd56g3(sd);
 
 	v4l2_async_unregister_subdev(&sensor->sd);
 	clk_disable_unprepare(sensor->xclk);
