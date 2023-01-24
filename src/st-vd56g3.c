@@ -11,6 +11,7 @@
 #include <linux/i2c.h>
 #include <linux/iopoll.h>
 #include <linux/module.h>
+#include <linux/pm_runtime.h>
 #include <linux/regulator/consumer.h>
 
 #include <asm/unaligned.h>
@@ -1371,23 +1372,37 @@ static int vd56g3_stream_disable(struct vd56g3 *sensor)
 static int vd56g3_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	struct vd56g3 *sensor = to_vd56g3(sd);
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	int ret = 0;
 
 	mutex_lock(&sensor->lock);
-	if (sensor->streaming == enable) {
-		mutex_unlock(&sensor->lock);
-		return 0;
+
+	if (enable) {
+		ret = pm_runtime_resume_and_get(&client->dev);
+		if (ret < 0)
+			goto unlock;
+
+		ret = vd56g3_stream_enable(sensor);
+		if (ret) {
+			dev_err(&client->dev, "Failed to start streaming\n");
+			pm_runtime_put_sync(&client->dev);
+		}
+	} else {
+		vd56g3_stream_disable(sensor);
+		pm_runtime_mark_last_busy(&client->dev);
+		pm_runtime_put_autosuspend(&client->dev);
 	}
 
-	ret = enable ? vd56g3_stream_enable(sensor) :
-		       vd56g3_stream_disable(sensor);
-	if (!ret)
-		sensor->streaming = enable;
+unlock:
 	mutex_unlock(&sensor->lock);
 
-	/* h/v flips locked during streaming */
-	v4l2_ctrl_grab(sensor->hflip_ctrl, enable);
-	v4l2_ctrl_grab(sensor->vflip_ctrl, enable);
+	if (!ret) {
+		sensor->streaming = enable;
+
+		/* h/v flips locked during streaming */
+		__v4l2_ctrl_grab(sensor->hflip_ctrl, enable);
+		__v4l2_ctrl_grab(sensor->vflip_ctrl, enable);
+	}
 
 	return ret;
 }
@@ -1737,6 +1752,349 @@ static const struct media_entity_operations vd56g3_subdev_entity_ops = {
 };
 
 /* ----------------------------------------------------------------------------
+ * Power management
+ */
+
+static int vd56g3_detect(struct vd56g3 *sensor)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	int id = 0;
+	int device_revision = 0;
+
+	id = vd56g3_read(sensor, VD56G3_REG_MODEL_ID);
+	if (id < 0)
+		return id;
+
+	if (id != VD56G3_MODEL_ID) {
+		dev_warn(&client->dev, "Unsupported sensor id %x", id);
+		return -ENODEV;
+	}
+
+	device_revision = vd56g3_read(sensor, VD56G3_REG_REVISION);
+	if (device_revision < 0)
+		return device_revision;
+
+	if ((device_revision >> 8) != 0x20) {
+		dev_warn(&client->dev, "Unsupported Cut version %x",
+			 device_revision);
+		return -ENODEV;
+	}
+
+	return 0;
+}
+
+static int vd56g3_patch(struct vd56g3 *sensor)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	const u8 *patch = patch_cut2;
+	int patch_size = sizeof(patch_cut2);
+	u8 patch_major;
+	u8 patch_minor;
+	int cur_patch_rev;
+	int ret;
+
+	patch_major = patch[3];
+	patch_minor = patch[2];
+
+	ret = vd56g3_write_array(sensor, 0x2000, patch_size, patch);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_write(sensor, VD56G3_REG_BOOT, VD56G3_CMD_PATCH_SETUP,
+			   NULL);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_poll_reg(sensor, VD56G3_REG_BOOT, VD56G3_CMD_ACK);
+	if (ret)
+		return ret;
+
+	cur_patch_rev = vd56g3_read(sensor, VD56G3_REG_FWPATCH_REVISION);
+	if (cur_patch_rev < 0)
+		return cur_patch_rev;
+
+	if (cur_patch_rev != (patch_major << 8) + patch_minor) {
+		dev_err(&client->dev,
+			"bad patch version expected %d.%d got %d.%d",
+			patch_major, patch_minor, cur_patch_rev >> 8,
+			cur_patch_rev & 0xff);
+		return -ENODEV;
+	}
+	dev_info(&client->dev, "patch %d.%d applied", cur_patch_rev >> 8,
+		 cur_patch_rev & 0xff);
+
+	return 0;
+}
+
+static int vd56g3_boot(struct vd56g3 *sensor)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	int ret;
+
+	ret = vd56g3_write(sensor, VD56G3_REG_BOOT, VD56G3_CMD_BOOT, NULL);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_poll_reg(sensor, VD56G3_REG_BOOT, VD56G3_CMD_ACK);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY);
+	if (ret)
+		return ret;
+
+	dev_info(&client->dev, "sensor boot successfully");
+
+	return 0;
+}
+
+static int vd56g3_vtpatch(struct vd56g3 *sensor)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	int i;
+	int vtpatch_offset = 0;
+	int cur_vtpatch_rd_rev, cur_vtpatch_gr_rev, cur_vtpatch_gt_rev;
+	int ret = 0;
+
+	ret = vd56g3_write(sensor, VD56G3_REG_VTPATCHING,
+			   VD56G3_CMD_START_VTRAM_UPDATE, NULL);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_poll_reg(sensor, VD56G3_REG_VTPATCHING, VD56G3_CMD_ACK);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY);
+	if (ret)
+		return ret;
+
+	for (i = 0; i < vtpatch_area_nb; i++) {
+		ret = vd56g3_write_array(sensor, vtpatch_desc[i].offset,
+					 vtpatch_desc[i].size,
+					 vtpatch + vtpatch_offset);
+		if (ret)
+			return ret;
+
+		vtpatch_offset += vtpatch_desc[i].size;
+	}
+	// TODO replace with correct register names
+	vd56g3_write(sensor, VD56G3_REG_8BIT(0xd9f8), VT_REVISION, &ret);
+	vd56g3_write(sensor, VD56G3_REG_8BIT(0xaffc), VT_REVISION, &ret);
+	vd56g3_write(sensor, VD56G3_REG_8BIT(0xbbb4), VT_REVISION, &ret);
+	vd56g3_write(sensor, VD56G3_REG_8BIT(0xb898), VT_REVISION, &ret);
+
+	vd56g3_write(sensor, VD56G3_REG_VTPATCHING, VD56G3_CMD_END_VTRAM_UPDATE,
+		     &ret);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_poll_reg(sensor, VD56G3_REG_VTPATCHING, VD56G3_CMD_ACK);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY);
+	if (ret)
+		return ret;
+
+	cur_vtpatch_rd_rev =
+		vd56g3_read(sensor, VD56G3_REG_VTIMING_RD_REVISION);
+	if (cur_vtpatch_rd_rev < 0)
+		return cur_vtpatch_rd_rev;
+	cur_vtpatch_gr_rev =
+		vd56g3_read(sensor, VD56G3_REG_VTIMING_GR_REVISION);
+	if (cur_vtpatch_gr_rev < 0)
+		return cur_vtpatch_gr_rev;
+	cur_vtpatch_gt_rev =
+		vd56g3_read(sensor, VD56G3_REG_VTIMING_GT_REVISION);
+	if (cur_vtpatch_gt_rev < 0)
+		return cur_vtpatch_gt_rev;
+
+	if (cur_vtpatch_rd_rev != VT_REVISION ||
+	    cur_vtpatch_gr_rev != VT_REVISION ||
+	    cur_vtpatch_gt_rev != VT_REVISION) {
+		dev_err(&client->dev,
+			"bad vtpatch version, expected %d got rd:%d, gr:%d gt:%d",
+			VT_REVISION, cur_vtpatch_rd_rev, cur_vtpatch_gr_rev,
+			cur_vtpatch_gt_rev);
+		return -ENODEV;
+	}
+	dev_info(&client->dev, "VT patch %d applied", VT_REVISION);
+
+	return 0;
+}
+
+
+static void vd56g3_get_pll_parameters(u32 freq, unsigned int *prediv,
+				      unsigned int *mult)
+{
+	const unsigned int predivs[] = { 1, 2, 4 };
+	int i;
+
+	/*
+	 * freq range is [6Mhz-27Mhz] already checked.
+	 * output of divider should be in [6Mhz-12Mhz[.
+	 */
+	for (i = 0; i < ARRAY_SIZE(predivs); i++) {
+		*prediv = predivs[i];
+		if (freq / *prediv < 12 * HZ_PER_MHZ)
+			break;
+	}
+	WARN_ON(i == ARRAY_SIZE(predivs));
+
+	/*
+	 * target freq is 804Mhz. Don't change this as it will impact image
+	 * quality.
+	 */
+	*mult = ((804 * HZ_PER_MHZ) * (*prediv) + freq / 2) / freq;
+}
+
+static int vd56g3_configure(struct vd56g3 *sensor)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	unsigned int prediv;
+	unsigned int mult;
+	unsigned int i;
+	int line_length;
+	int optical_rev;
+	int ret = 0;
+
+	vd56g3_get_pll_parameters(sensor->clk_freq, &prediv, &mult);
+	/* cache line_length value */
+	line_length = vd56g3_read(sensor, VD56G3_REG_LINE_LENGTH);
+	if (line_length < 0)
+		return line_length;
+	sensor->line_length = line_length;
+	/* configure clocks */
+	vd56g3_write(sensor, VD56G3_REG_EXT_CLOCK, sensor->clk_freq, &ret);
+	vd56g3_write(sensor, VD56G3_REG_CLK_PLL_PREDIV, prediv, &ret);
+	vd56g3_write(sensor, VD56G3_REG_CLK_SYS_PLL_MULT, mult, &ret);
+
+	/* configure interface */
+	vd56g3_write(sensor, VD56G3_REG_OIF_CTRL, sensor->oif_ctrl, &ret);
+	vd56g3_write(sensor, VD56G3_REG_OIF_CSI_BITRATE, 804, &ret);
+	vd56g3_write(sensor, VD56G3_REG_ISL_ENABLE, 0, &ret);
+
+	/* use auto expo by default */
+	vd56g3_write(sensor, VD56G3_REG_EXP_MODE, VD56G3_EXP_MODE_AUTO, &ret);
+
+	/* gpios in input (disabled) by default */
+	for (i = 0; i < 8; i++)
+		vd56g3_write(sensor, VD56G3_REG_GPIO_0_CTRL + i, 0x01, &ret);
+
+	if (ret)
+		return ret;
+
+	sensor->data_rate_in_mbps = (mult * sensor->clk_freq) / prediv;
+	sensor->pclk = (sensor->data_rate_in_mbps * 2) / 10;
+	dev_dbg(&client->dev, "clock prediv = %d", prediv);
+	dev_dbg(&client->dev, "clock mult = %d", mult);
+	dev_info(&client->dev, "data rate = %d mbps",
+		 sensor->data_rate_in_mbps);
+
+	// TODO : move to a "better" place ?
+	optical_rev = vd56g3_read(sensor, VD56G3_REG_OPTICAL_REVISION);
+	if (optical_rev < 0)
+		return optical_rev;
+
+	sensor->is_rgb = ((optical_rev & 1) == 1);
+
+	return 0;
+}
+
+static int vd56g3_power_on(struct vd56g3 *sensor)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	int ret;
+
+	ret = regulator_bulk_enable(VD56G3_NUM_SUPPLIES, sensor->supplies);
+	if (ret) {
+		dev_err(&client->dev, "Failed to enable regulators %d", ret);
+		return ret;
+	}
+
+	ret = clk_prepare_enable(sensor->xclk);
+	if (ret) {
+		dev_err(&client->dev, "Failed to enable clock %d", ret);
+		goto disable_reg;
+	}
+
+	gpiod_set_value_cansleep(sensor->reset_gpio, 0);
+	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_READY_TO_BOOT);
+	if (ret) {
+		dev_err(&client->dev, "Sensor reset failed %d\n", ret);
+		goto disable_clock;
+	}
+
+	ret = vd56g3_detect(sensor);
+	if (ret) {
+		dev_err(&client->dev, "sensor detect failed %d", ret);
+		goto disable_clock;
+	}
+
+	ret = vd56g3_patch(sensor);
+	if (ret) {
+		dev_err(&client->dev, "sensor patch failed %d", ret);
+		goto disable_clock;
+	}
+
+	ret = vd56g3_boot(sensor);
+	if (ret) {
+		dev_err(&client->dev, "sensor boot failed %d", ret);
+		goto disable_clock;
+	}
+
+	ret = vd56g3_vtpatch(sensor);
+	if (ret) {
+		dev_err(&client->dev, "sensor VT patch failed %d", ret);
+		goto disable_clock;
+	}
+
+	ret = vd56g3_configure(sensor);
+	if (ret) {
+		dev_err(&client->dev, "sensor configuration failed %d", ret);
+		goto disable_clock;
+	}
+
+	return 0;
+
+disable_clock:
+	clk_disable_unprepare(sensor->xclk);
+	gpiod_set_value_cansleep(sensor->reset_gpio, 1);
+disable_reg:
+	regulator_bulk_disable(VD56G3_NUM_SUPPLIES, sensor->supplies);
+
+	return ret;
+}
+
+static int vd56g3_power_off(struct vd56g3 *sensor)
+{
+	clk_disable_unprepare(sensor->xclk);
+	gpiod_set_value_cansleep(sensor->reset_gpio, 1);
+	regulator_bulk_disable(VD56G3_NUM_SUPPLIES, sensor->supplies);
+	return 0;
+}
+
+static int vd56g3_runtime_resume(struct device *dev)
+{
+	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct vd56g3 *vd56g3 = to_vd56g3(sd);
+
+	return vd56g3_power_on(vd56g3);
+}
+
+static int vd56g3_runtime_suspend(struct device *dev)
+{
+	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct vd56g3 *vd56g3 = to_vd56g3(sd);
+
+	return vd56g3_power_off(vd56g3);
+}
+
+static const struct dev_pm_ops vd56g3_pm_ops = { SET_RUNTIME_PM_OPS(
+	vd56g3_runtime_suspend, vd56g3_runtime_resume, NULL) };
+
+/* ----------------------------------------------------------------------------
  * Probe and initialization
  */
 
@@ -1932,267 +2290,6 @@ static int vd56g3_get_regulators(struct vd56g3 *sensor)
 				       VD56G3_NUM_SUPPLIES, sensor->supplies);
 }
 
-static void vd56g3_apply_reset(struct vd56g3 *sensor)
-{
-	gpiod_set_value_cansleep(sensor->reset_gpio, 0);
-	usleep_range(5000, 10000);
-	gpiod_set_value_cansleep(sensor->reset_gpio, 1);
-	usleep_range(5000, 10000);
-	gpiod_set_value_cansleep(sensor->reset_gpio, 0);
-	usleep_range(5000, 10000);
-}
-
-static int vd56g3_detect(struct vd56g3 *sensor)
-{
-	struct i2c_client *client = sensor->i2c_client;
-	int id = 0;
-	int device_revision = 0;
-	int ret;
-
-	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_READY_TO_BOOT);
-	if (ret)
-		return ret;
-
-	id = vd56g3_read(sensor, VD56G3_REG_MODEL_ID);
-	if (id < 0)
-		return id;
-
-	if (id != VD56G3_MODEL_ID) {
-		dev_warn(&client->dev, "Unsupported sensor id %x", id);
-		return -ENODEV;
-	}
-
-	device_revision = vd56g3_read(sensor, VD56G3_REG_REVISION);
-	if (device_revision < 0)
-		return device_revision;
-
-	if ((device_revision >> 8) != 0x20) {
-		dev_warn(&client->dev, "Unsupported Cut version %x",
-			 device_revision);
-		return -ENODEV;
-	}
-
-	return 0;
-}
-
-static int vd56g3_patch(struct vd56g3 *sensor)
-{
-	struct i2c_client *client = sensor->i2c_client;
-	const u8 *patch = patch_cut2;
-	int patch_size = sizeof(patch_cut2);
-	u8 patch_major;
-	u8 patch_minor;
-	int cur_patch_rev;
-	int ret;
-
-	patch_major = patch[3];
-	patch_minor = patch[2];
-
-	ret = vd56g3_write_array(sensor, 0x2000, patch_size, patch);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_write(sensor, VD56G3_REG_BOOT, VD56G3_CMD_PATCH_SETUP,
-			   NULL);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_poll_reg(sensor, VD56G3_REG_BOOT, VD56G3_CMD_ACK);
-	if (ret)
-		return ret;
-
-	cur_patch_rev = vd56g3_read(sensor, VD56G3_REG_FWPATCH_REVISION);
-	if (cur_patch_rev < 0)
-		return cur_patch_rev;
-
-	if (cur_patch_rev != (patch_major << 8) + patch_minor) {
-		dev_err(&client->dev,
-			"bad patch version expected %d.%d got %d.%d",
-			patch_major, patch_minor, cur_patch_rev >> 8,
-			cur_patch_rev & 0xff);
-		return -ENODEV;
-	}
-	dev_info(&client->dev, "patch %d.%d applied", cur_patch_rev >> 8,
-		 cur_patch_rev & 0xff);
-
-	return 0;
-}
-
-static int vd56g3_boot(struct vd56g3 *sensor)
-{
-	struct i2c_client *client = sensor->i2c_client;
-	int ret;
-
-	ret = vd56g3_write(sensor, VD56G3_REG_BOOT, VD56G3_CMD_BOOT, NULL);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_poll_reg(sensor, VD56G3_REG_BOOT, VD56G3_CMD_ACK);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY);
-	if (ret)
-		return ret;
-
-	dev_info(&client->dev, "sensor boot successfully");
-
-	return 0;
-}
-
-static int vd56g3_vtpatch(struct vd56g3 *sensor)
-{
-	struct i2c_client *client = sensor->i2c_client;
-	int i;
-	int vtpatch_offset = 0;
-	int cur_vtpatch_rd_rev, cur_vtpatch_gr_rev, cur_vtpatch_gt_rev;
-	int ret = 0;
-
-	ret = vd56g3_write(sensor, VD56G3_REG_VTPATCHING,
-			   VD56G3_CMD_START_VTRAM_UPDATE, NULL);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_poll_reg(sensor, VD56G3_REG_VTPATCHING, VD56G3_CMD_ACK);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY);
-	if (ret)
-		return ret;
-
-	for (i = 0; i < vtpatch_area_nb; i++) {
-		ret = vd56g3_write_array(sensor, vtpatch_desc[i].offset,
-					 vtpatch_desc[i].size,
-					 vtpatch + vtpatch_offset);
-		if (ret)
-			return ret;
-
-		vtpatch_offset += vtpatch_desc[i].size;
-	}
-	// TODO replace with correct register names
-	vd56g3_write(sensor, VD56G3_REG_8BIT(0xd9f8), VT_REVISION, &ret);
-	vd56g3_write(sensor, VD56G3_REG_8BIT(0xaffc), VT_REVISION, &ret);
-	vd56g3_write(sensor, VD56G3_REG_8BIT(0xbbb4), VT_REVISION, &ret);
-	vd56g3_write(sensor, VD56G3_REG_8BIT(0xb898), VT_REVISION, &ret);
-
-	vd56g3_write(sensor, VD56G3_REG_VTPATCHING, VD56G3_CMD_END_VTRAM_UPDATE,
-		     &ret);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_poll_reg(sensor, VD56G3_REG_VTPATCHING, VD56G3_CMD_ACK);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY);
-	if (ret)
-		return ret;
-
-	cur_vtpatch_rd_rev =
-		vd56g3_read(sensor, VD56G3_REG_VTIMING_RD_REVISION);
-	if (cur_vtpatch_rd_rev < 0)
-		return cur_vtpatch_rd_rev;
-	cur_vtpatch_gr_rev =
-		vd56g3_read(sensor, VD56G3_REG_VTIMING_GR_REVISION);
-	if (cur_vtpatch_gr_rev < 0)
-		return cur_vtpatch_gr_rev;
-	cur_vtpatch_gt_rev =
-		vd56g3_read(sensor, VD56G3_REG_VTIMING_GT_REVISION);
-	if (cur_vtpatch_gt_rev < 0)
-		return cur_vtpatch_gt_rev;
-
-	if (cur_vtpatch_rd_rev != VT_REVISION ||
-	    cur_vtpatch_gr_rev != VT_REVISION ||
-	    cur_vtpatch_gt_rev != VT_REVISION) {
-		dev_err(&client->dev,
-			"bad vtpatch version, expected %d got rd:%d, gr:%d gt:%d",
-			VT_REVISION, cur_vtpatch_rd_rev, cur_vtpatch_gr_rev,
-			cur_vtpatch_gt_rev);
-		return -ENODEV;
-	}
-	dev_info(&client->dev, "VT patch %d applied", VT_REVISION);
-
-	return 0;
-}
-
-static void vd56g3_get_pll_parameters(u32 freq, unsigned int *prediv,
-				      unsigned int *mult)
-{
-	const unsigned int predivs[] = { 1, 2, 4 };
-	int i;
-
-	/*
-	 * freq range is [6Mhz-27Mhz] already checked.
-	 * output of divider should be in [6Mhz-12Mhz[.
-	 */
-	for (i = 0; i < ARRAY_SIZE(predivs); i++) {
-		*prediv = predivs[i];
-		if (freq / *prediv < 12 * HZ_PER_MHZ)
-			break;
-	}
-	WARN_ON(i == ARRAY_SIZE(predivs));
-
-	/*
-	 * target freq is 804Mhz. Don't change this as it will impact image
-	 * quality.
-	 */
-	*mult = ((804 * HZ_PER_MHZ) * (*prediv) + freq / 2) / freq;
-}
-
-static int vd56g3_configure(struct vd56g3 *sensor)
-{
-	struct i2c_client *client = sensor->i2c_client;
-	unsigned int prediv;
-	unsigned int mult;
-	unsigned int i;
-	int line_length;
-	int optical_rev;
-	int ret = 0;
-
-	vd56g3_get_pll_parameters(sensor->clk_freq, &prediv, &mult);
-	/* cache line_length value */
-	line_length = vd56g3_read(sensor, VD56G3_REG_LINE_LENGTH);
-	if (line_length < 0)
-		return line_length;
-	sensor->line_length = line_length;
-	/* configure clocks */
-	vd56g3_write(sensor, VD56G3_REG_EXT_CLOCK, sensor->clk_freq, &ret);
-	vd56g3_write(sensor, VD56G3_REG_CLK_PLL_PREDIV, prediv, &ret);
-	vd56g3_write(sensor, VD56G3_REG_CLK_SYS_PLL_MULT, mult, &ret);
-
-	/* configure interface */
-	vd56g3_write(sensor, VD56G3_REG_OIF_CTRL, sensor->oif_ctrl, &ret);
-	vd56g3_write(sensor, VD56G3_REG_OIF_CSI_BITRATE, 804, &ret);
-	vd56g3_write(sensor, VD56G3_REG_ISL_ENABLE, 0, &ret);
-
-	/* use auto expo by default */
-	vd56g3_write(sensor, VD56G3_REG_EXP_MODE, VD56G3_EXP_MODE_AUTO, &ret);
-
-	/* gpios in input (disabled) by default */
-	for (i = 0; i < 8; i++)
-		vd56g3_write(sensor, VD56G3_REG_GPIO_0_CTRL + i, 0x01, &ret);
-
-	if (ret)
-		return ret;
-
-	sensor->data_rate_in_mbps = (mult * sensor->clk_freq) / prediv;
-	sensor->pclk = (sensor->data_rate_in_mbps * 2) / 10;
-	dev_dbg(&client->dev, "clock prediv = %d", prediv);
-	dev_dbg(&client->dev, "clock mult = %d", mult);
-	dev_info(&client->dev, "data rate = %d mbps",
-		 sensor->data_rate_in_mbps);
-
-	// TODO : move to a "better" place ?
-	optical_rev = vd56g3_read(sensor, VD56G3_REG_OPTICAL_REVISION);
-	if (optical_rev < 0)
-		return optical_rev;
-
-	sensor->is_rgb = ((optical_rev & 1) == 1);
-
-	return 0;
-}
-
 static int vd56g3_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
@@ -2227,8 +2324,7 @@ static int vd56g3_probe(struct i2c_client *client)
 		dev_err(dev, "Failed to parse handle %d\n", ret);
 		return ret;
 	}
-
-	sensor->xclk = devm_clk_get(dev, "xclk");
+	sensor->xclk = devm_clk_get(dev, NULL);
 	if (IS_ERR(sensor->xclk)) {
 		dev_err(dev, "failed to get xclk\n");
 		return PTR_ERR(sensor->xclk);
@@ -2254,62 +2350,21 @@ static int vd56g3_probe(struct i2c_client *client)
 		return ret;
 	}
 
-	/* request optional reset pin */
 	sensor->reset_gpio =
 		devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
 
 	ret = vd56g3_get_regulators(sensor);
 	if (ret) {
 		dev_err(&client->dev, "failed to get regulators %d", ret);
-		goto entity_cleanup;
-	}
-
-	ret = regulator_bulk_enable(VD56G3_NUM_SUPPLIES, sensor->supplies);
-	if (ret) {
-		dev_err(&client->dev, "failed to enable regulators %d", ret);
-		goto entity_cleanup;
-	}
-
-	ret = clk_prepare_enable(sensor->xclk);
-	if (ret) {
-		dev_err(&client->dev, "failed to enable clock %d", ret);
-		goto disable_bulk;
+		goto err_clean_entity;
 	}
 
 	mutex_init(&sensor->lock);
 
-	/* apply reset sequence */
-	if (sensor->reset_gpio)
-		vd56g3_apply_reset(sensor);
-
-	ret = vd56g3_detect(sensor);
+	ret = vd56g3_power_on(sensor);
 	if (ret) {
-		dev_err(&client->dev, "sensor detect failed %d", ret);
-		goto disable_clock;
-	}
-
-	ret = vd56g3_patch(sensor);
-	if (ret) {
-		dev_err(&client->dev, "sensor patch failed %d", ret);
-		goto disable_clock;
-	}
-
-	ret = vd56g3_boot(sensor);
-	if (ret) {
-		dev_err(&client->dev, "sensor boot failed %d", ret);
-		goto disable_clock;
-	}
-
-	ret = vd56g3_vtpatch(sensor);
-	if (ret) {
-		dev_err(&client->dev, "sensor VT patch failed %d", ret);
-		goto disable_clock;
-	}
-
-	ret = vd56g3_configure(sensor);
-	if (ret) {
-		dev_err(&client->dev, "sensor configuration failed %d", ret);
-		goto disable_clock;
+		dev_err(&client->dev, "sensor power on failed %d", ret);
+		goto err_clean_entity;
 	}
 
 	// TODO : drop if possible
@@ -2322,13 +2377,13 @@ static int vd56g3_probe(struct i2c_client *client)
 					   sensor->current_mode->crop.height);
 	if (ret) {
 		dev_err(&client->dev, "Vblank initialization failed %d", ret);
-		goto disable_clock;
+		goto err_power_off;
 	}
 
 	ret = vd56g3_init_controls(sensor);
 	if (ret) {
 		dev_err(&client->dev, "controls initialization failed %d", ret);
-		goto disable_clock;
+		goto err_power_off;
 	}
 
 	// TODO : temporary after vd56g3_init_controls() because at the end
@@ -2337,24 +2392,39 @@ static int vd56g3_probe(struct i2c_client *client)
 	ret = vd56g3_init_cfg(&sensor->sd, NULL);
 	if (ret) {
 		dev_err(&client->dev, "Init config failed %d", ret);
-		goto disable_clock;
+		goto err_free_ctrl_handler;
 	}
+
+	// Enable PM runtime with autosuspend (4s corresponding to boot time)
+	// As the device has been already powered manually, mark it as active
+	pm_runtime_set_active(dev);
+	pm_runtime_get_noresume(dev);
+	pm_runtime_enable(dev);
+	pm_runtime_set_autosuspend_delay(dev, 4000);
+	pm_runtime_use_autosuspend(dev);
 
 	ret = v4l2_async_register_subdev(&sensor->sd);
 	if (ret) {
 		dev_err(&client->dev, "async subdev register failed %d", ret);
-		goto disable_clock;
+		goto err_free_ctrl_handler;
 	}
+
+	// Decrease the PM usage count. The device will get suspended after the
+	// autosuspend delay, turning the power off
+	pm_runtime_mark_last_busy(dev);
+	pm_runtime_put_autosuspend(dev);
 
 	dev_info(&client->dev, "vd56g3 probe successfully");
 
 	return 0;
 
-disable_clock:
-	clk_disable_unprepare(sensor->xclk);
-disable_bulk:
-	regulator_bulk_disable(VD56G3_NUM_SUPPLIES, sensor->supplies);
-entity_cleanup:
+err_free_ctrl_handler:
+	v4l2_ctrl_handler_free(sensor->sd.ctrl_handler);
+err_power_off:
+	pm_runtime_disable(dev);
+	pm_runtime_put_noidle(dev);
+	vd56g3_power_off(sensor);
+err_clean_entity:
 	mutex_destroy(&sensor->lock);
 	media_entity_cleanup(&sensor->sd.entity);
 	return ret;
@@ -2366,10 +2436,14 @@ static int vd56g3_remove(struct i2c_client *client)
 	struct vd56g3 *sensor = to_vd56g3(sd);
 
 	v4l2_async_unregister_subdev(&sensor->sd);
-	clk_disable_unprepare(sensor->xclk);
 	mutex_destroy(&sensor->lock);
 	media_entity_cleanup(&sensor->sd.entity);
-	regulator_bulk_disable(VD56G3_NUM_SUPPLIES, sensor->supplies);
+	v4l2_ctrl_handler_free(sensor->sd.ctrl_handler);
+
+	pm_runtime_disable(&client->dev);
+	if (!pm_runtime_status_suspended(&client->dev))
+		vd56g3_power_off(sensor);
+	pm_runtime_set_suspended(&client->dev);
 
 	return 0;
 }
@@ -2384,6 +2458,7 @@ static struct i2c_driver vd56g3_i2c_driver = {
 	.driver = {
 		.name  = "st-vd56g3",
 		.of_match_table = vd56g3_dt_ids,
+		.pm = &vd56g3_pm_ops,
 	},
 	.probe_new = vd56g3_probe,
 	.remove = vd56g3_remove,
