@@ -37,6 +37,27 @@
 #include <linux/units.h>
 #endif
 
+#if KERNEL_VERSION(5, 9, 0) >= LINUX_VERSION_CODE
+int dev_err_probe(const struct device *dev, int err, const char *fmt, ...)
+{
+	struct va_format vaf;
+	va_list args;
+
+	va_start(args, fmt);
+	vaf.fmt = fmt;
+	vaf.va = &args;
+
+	if (err != -EPROBE_DEFER)
+		dev_err(dev, "error %d: %pV", err, &vaf);
+	else
+		dev_dbg(dev, "error %d: %pV", err, &vaf);
+
+	va_end(args);
+
+	return err;
+}
+#endif
+
 #define VD56G3_REG_SIZE_SHIFT		16
 #define VD56G3_REG_ADDR_MASK		0xffff
 #define VD56G3_REG_8BIT(n)		((1 << VD56G3_REG_SIZE_SHIFT) | (n))
@@ -1278,7 +1299,7 @@ static const struct v4l2_ctrl_config vd56g3_ae_leak_prop_ctrl = {
  * Videos ops
  */
 
-static int vd56g3_stream_enable(struct vd56g3 *sensor)
+static int vd56g3_stream_on(struct vd56g3 *sensor)
 {
 	const struct v4l2_rect *crop = &sensor->current_mode->crop;
 	int is_isl = sensor->current_mode->is_isl;
@@ -1344,7 +1365,7 @@ static int vd56g3_stream_enable(struct vd56g3 *sensor)
 	return 0;
 }
 
-static int vd56g3_stream_disable(struct vd56g3 *sensor)
+static int vd56g3_stream_off(struct vd56g3 *sensor)
 {
 	int ret;
 
@@ -1382,13 +1403,13 @@ static int vd56g3_s_stream(struct v4l2_subdev *sd, int enable)
 		if (ret < 0)
 			goto unlock;
 
-		ret = vd56g3_stream_enable(sensor);
+		ret = vd56g3_stream_on(sensor);
 		if (ret) {
 			dev_err(&client->dev, "Failed to start streaming\n");
 			pm_runtime_put_sync(&client->dev);
 		}
 	} else {
-		vd56g3_stream_disable(sensor);
+		vd56g3_stream_off(sensor);
 		pm_runtime_mark_last_busy(&client->dev);
 		pm_runtime_put_autosuspend(&client->dev);
 	}
@@ -1752,36 +1773,8 @@ static const struct media_entity_operations vd56g3_subdev_entity_ops = {
 };
 
 /* ----------------------------------------------------------------------------
- * Power management
+ * Boot section (includes FMW and VT Patch)
  */
-
-static int vd56g3_detect(struct vd56g3 *sensor)
-{
-	struct i2c_client *client = sensor->i2c_client;
-	int id = 0;
-	int device_revision = 0;
-
-	id = vd56g3_read(sensor, VD56G3_REG_MODEL_ID);
-	if (id < 0)
-		return id;
-
-	if (id != VD56G3_MODEL_ID) {
-		dev_warn(&client->dev, "Unsupported sensor id %x", id);
-		return -ENODEV;
-	}
-
-	device_revision = vd56g3_read(sensor, VD56G3_REG_REVISION);
-	if (device_revision < 0)
-		return device_revision;
-
-	if ((device_revision >> 8) != 0x20) {
-		dev_warn(&client->dev, "Unsupported Cut version %x",
-			 device_revision);
-		return -ENODEV;
-	}
-
-	return 0;
-}
 
 static int vd56g3_patch(struct vd56g3 *sensor)
 {
@@ -1924,6 +1917,9 @@ static int vd56g3_vtpatch(struct vd56g3 *sensor)
 	return 0;
 }
 
+/* ----------------------------------------------------------------------------
+ * Power management
+ */
 
 static void vd56g3_get_pll_parameters(u32 freq, unsigned int *prediv,
 				      unsigned int *mult)
@@ -1956,7 +1952,6 @@ static int vd56g3_configure(struct vd56g3 *sensor)
 	unsigned int mult;
 	unsigned int i;
 	int line_length;
-	int optical_rev;
 	int ret = 0;
 
 	vd56g3_get_pll_parameters(sensor->clk_freq, &prediv, &mult);
@@ -1992,13 +1987,6 @@ static int vd56g3_configure(struct vd56g3 *sensor)
 	dev_info(&client->dev, "data rate = %d mbps",
 		 sensor->data_rate_in_mbps);
 
-	// TODO : move to a "better" place ?
-	optical_rev = vd56g3_read(sensor, VD56G3_REG_OPTICAL_REVISION);
-	if (optical_rev < 0)
-		return optical_rev;
-
-	sensor->is_rgb = ((optical_rev & 1) == 1);
-
 	return 0;
 }
 
@@ -2026,36 +2014,6 @@ static int vd56g3_power_on(struct vd56g3 *sensor)
 		goto disable_clock;
 	}
 
-	ret = vd56g3_detect(sensor);
-	if (ret) {
-		dev_err(&client->dev, "sensor detect failed %d", ret);
-		goto disable_clock;
-	}
-
-	ret = vd56g3_patch(sensor);
-	if (ret) {
-		dev_err(&client->dev, "sensor patch failed %d", ret);
-		goto disable_clock;
-	}
-
-	ret = vd56g3_boot(sensor);
-	if (ret) {
-		dev_err(&client->dev, "sensor boot failed %d", ret);
-		goto disable_clock;
-	}
-
-	ret = vd56g3_vtpatch(sensor);
-	if (ret) {
-		dev_err(&client->dev, "sensor VT patch failed %d", ret);
-		goto disable_clock;
-	}
-
-	ret = vd56g3_configure(sensor);
-	if (ret) {
-		dev_err(&client->dev, "sensor configuration failed %d", ret);
-		goto disable_clock;
-	}
-
 	return 0;
 
 disable_clock:
@@ -2065,6 +2023,44 @@ disable_reg:
 	regulator_bulk_disable(VD56G3_NUM_SUPPLIES, sensor->supplies);
 
 	return ret;
+}
+
+static int vd56g3_power_patch(struct vd56g3 *sensor)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	int ret;
+
+	ret = vd56g3_power_on(sensor);
+	if (ret) {
+		dev_err(&client->dev, "Failed to power on %d", ret);
+		return ret;
+	}
+
+	ret = vd56g3_patch(sensor);
+	if (ret) {
+		dev_err(&client->dev, "sensor patch failed %d", ret);
+		return ret;
+	}
+
+	ret = vd56g3_boot(sensor);
+	if (ret) {
+		dev_err(&client->dev, "sensor boot failed %d", ret);
+		return ret;
+	}
+
+	ret = vd56g3_vtpatch(sensor);
+	if (ret) {
+		dev_err(&client->dev, "sensor VT patch failed %d", ret);
+		return ret;
+	}
+
+	ret = vd56g3_configure(sensor);
+	if (ret) {
+		dev_err(&client->dev, "sensor configuration failed %d", ret);
+		return ret;
+	}
+
+	return 0;
 }
 
 static int vd56g3_power_off(struct vd56g3 *sensor)
@@ -2080,7 +2076,7 @@ static int vd56g3_runtime_resume(struct device *dev)
 	struct v4l2_subdev *sd = dev_get_drvdata(dev);
 	struct vd56g3 *vd56g3 = to_vd56g3(sd);
 
-	return vd56g3_power_on(vd56g3);
+	return vd56g3_power_patch(vd56g3);
 }
 
 static int vd56g3_runtime_suspend(struct device *dev)
@@ -2102,7 +2098,6 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 {
 	const struct v4l2_ctrl_ops *ops = &vd56g3_ctrl_ops;
 	struct v4l2_ctrl_handler *hdl = &sensor->ctrl_handler;
-	const struct vd56g3_mode *cur_mode = sensor->current_mode;
 	struct v4l2_ctrl *ctrl;
 	int ret;
 
@@ -2123,9 +2118,9 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 				     ARRAY_SIZE(vd56g3_test_pattern_menu) - 1,
 				     0, 0, vd56g3_test_pattern_menu);
 	/* add V4L2_CID_PIXEL_RATE */
+	/* Will be updated dynamically depending of Media Bus Format */
 	sensor->pixel_rate_ctrl =
-		v4l2_ctrl_new_std(hdl, ops, V4L2_CID_PIXEL_RATE, 1, INT_MAX, 1,
-				  vd56g3_get_pixel_rate(sensor));
+		v4l2_ctrl_new_std(hdl, ops, V4L2_CID_PIXEL_RATE, 1, 1, 1, 1);
 	// TODO : no more V4L2_CTRL_FLAG_VOLATILE ?
 	sensor->pixel_rate_ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 	ctrl = v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_LINK_FREQ,
@@ -2145,10 +2140,10 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_DIGITAL_GAIN, 0, 0xfff, 1,
 			  sensor->digital_gain);
 	/* V4L2_CID_EXPOSURE */
-	sensor->expo_ctrl =
-		v4l2_ctrl_new_std(hdl, ops, V4L2_CID_EXPOSURE, 0,
-				  sensor->frame_length - VD56G3_EXPOSURE_OFFSET,
-				  1, VD56G3_EXPOSURE_DEFAULT);
+	/* Will be updated dynamically depending of resolution */
+	sensor->expo_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_EXPOSURE, 0,
+					      VD56G3_EXPOSURE_DEFAULT, 1,
+					      VD56G3_EXPOSURE_DEFAULT);
 	/* V4L2_CID_3A_LOCK */
 	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_3A_LOCK, 0, 7, 0, 0);
 	/* V4L2_CID_AUTO_EXPOSURE_BIAS */
@@ -2156,15 +2151,12 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 			       ARRAY_SIZE(vd56g3_ev_bias_qmenu) - 1,
 			       (ARRAY_SIZE(vd56g3_ev_bias_qmenu) + 1) / 2 - 1,
 			       vd56g3_ev_bias_qmenu);
-	/* Blanking controls (and related)*/
-	ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HBLANK, 0,
-				 sensor->line_length, 1,
-				 sensor->line_length - cur_mode->width);
+	/* Blanking controls could change dynamically */
+	/* Hard code them; will be updated later */
+	ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HBLANK, 1, 1, 1, 1);
 	ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
-	sensor->vblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VBLANK,
-						sensor->vblank_min,
-						0xffff - cur_mode->crop.height,
-						1, sensor->vblank);
+	sensor->vblank_ctrl =
+		v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VBLANK, 1, 1, 1, 1);
 	/* gpios stuff */
 	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio0_ctrl, NULL);
 	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio1_ctrl, NULL);
@@ -2279,34 +2271,12 @@ error_ep:
 	return -EINVAL;
 }
 
-static int vd56g3_get_regulators(struct vd56g3 *sensor)
+static int vd56g3_parse_dt(struct vd56g3 *sensor)
 {
-	int i;
-
-	for (i = 0; i < VD56G3_NUM_SUPPLIES; i++)
-		sensor->supplies[i].supply = vd56g3_supply_names[i];
-
-	return devm_regulator_bulk_get(&sensor->i2c_client->dev,
-				       VD56G3_NUM_SUPPLIES, sensor->supplies);
-}
-
-static int vd56g3_probe(struct i2c_client *client)
-{
+	struct i2c_client *client = sensor->i2c_client;
 	struct device *dev = &client->dev;
 	struct fwnode_handle *handle;
-	struct vd56g3 *sensor;
 	int ret;
-
-	sensor = devm_kzalloc(dev, sizeof(*sensor), GFP_KERNEL);
-	if (!sensor)
-		return -ENOMEM;
-
-	sensor->i2c_client = client;
-	sensor->streaming = false;
-	sensor->manual_expo = VD56G3_EXPOSURE_DEFAULT;
-	sensor->expo_state = VD56G3_EXPO_AUTO;
-	sensor->analog_gain = 0;
-	sensor->digital_gain = 0x100;
 
 #if KERNEL_VERSION(5, 2, 0) >= LINUX_VERSION_CODE
 	handle = fwnode_graph_get_next_endpoint(of_fwnode_handle(dev->of_node),
@@ -2324,11 +2294,138 @@ static int vd56g3_probe(struct i2c_client *client)
 		dev_err(dev, "Failed to parse handle %d\n", ret);
 		return ret;
 	}
-	sensor->xclk = devm_clk_get(dev, NULL);
-	if (IS_ERR(sensor->xclk)) {
-		dev_err(dev, "failed to get xclk\n");
-		return PTR_ERR(sensor->xclk);
+
+	return 0;
+}
+
+static int vd56g3_get_regulators(struct vd56g3 *sensor)
+{
+	int i;
+
+	for (i = 0; i < VD56G3_NUM_SUPPLIES; i++)
+		sensor->supplies[i].supply = vd56g3_supply_names[i];
+
+	return devm_regulator_bulk_get(&sensor->i2c_client->dev,
+				       VD56G3_NUM_SUPPLIES, sensor->supplies);
+}
+
+static int vd56g3_detect(struct vd56g3 *sensor)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	int id = 0;
+	int device_revision = 0;
+	int optical_revision = 0;
+
+	id = vd56g3_read(sensor, VD56G3_REG_MODEL_ID);
+	if (id < 0)
+		return id;
+
+	if (id != VD56G3_MODEL_ID) {
+		dev_warn(&client->dev, "Unsupported sensor id %x", id);
+		return -ENODEV;
 	}
+
+	device_revision = vd56g3_read(sensor, VD56G3_REG_REVISION);
+	if (device_revision < 0)
+		return device_revision;
+
+	if ((device_revision >> 8) != 0x20) {
+		dev_warn(&client->dev, "Unsupported Cut version %x",
+			 device_revision);
+		return -ENODEV;
+	}
+
+	optical_revision = vd56g3_read(sensor, VD56G3_REG_OPTICAL_REVISION);
+	if (optical_revision < 0)
+		return optical_revision;
+
+	sensor->is_rgb = ((optical_revision & 1) == 1);
+
+	return 0;
+}
+
+static int vd56g3_subdev_init(struct vd56g3 *sensor)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	int ret;
+
+	mutex_init(&sensor->lock);
+	sensor->streaming = false;
+	sensor->manual_expo = VD56G3_EXPOSURE_DEFAULT;
+	sensor->expo_state = VD56G3_EXPO_AUTO;
+	sensor->analog_gain = 0;
+	sensor->digital_gain = 0x100;
+	sensor->current_mode = &vd56g3_supported_modes[0];
+	sensor->fmt.code = vd56g3_mbus_codes[0][0];
+
+	v4l2_i2c_subdev_init(&sensor->sd, client, &vd56g3_subdev_ops);
+	sensor->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
+	sensor->sd.entity.ops = &vd56g3_subdev_entity_ops;
+	sensor->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
+
+	sensor->pad.flags = MEDIA_PAD_FL_SOURCE;
+	ret = media_entity_pads_init(&sensor->sd.entity, 1, &sensor->pad);
+	if (ret) {
+		dev_err(&client->dev, "Failed to init media entity : %d", ret);
+		return ret;
+	}
+
+	ret = vd56g3_init_controls(sensor);
+	if (ret) {
+		dev_err(&client->dev, "Controls initialization failed %d", ret);
+		goto err_media;
+	}
+
+	ret = vd56g3_init_cfg(&sensor->sd, NULL);
+	if (ret) {
+		dev_err(&client->dev, "Init config failed %d", ret);
+		goto err_ctrls;
+	}
+
+	return 0;
+
+err_ctrls:
+	v4l2_ctrl_handler_free(sensor->sd.ctrl_handler);
+err_media:
+	media_entity_cleanup(&sensor->sd.entity);
+	return ret;
+}
+
+static void vd56g3_subdev_cleanup(struct vd56g3 *sensor)
+{
+	v4l2_async_unregister_subdev(&sensor->sd);
+	mutex_destroy(&sensor->lock);
+	media_entity_cleanup(&sensor->sd.entity);
+	v4l2_ctrl_handler_free(sensor->sd.ctrl_handler);
+}
+
+static int vd56g3_probe(struct i2c_client *client)
+{
+	struct device *dev = &client->dev;
+	struct vd56g3 *sensor;
+	int ret;
+
+	sensor = devm_kzalloc(dev, sizeof(*sensor), GFP_KERNEL);
+	if (!sensor)
+		return -ENOMEM;
+
+	sensor->i2c_client = client;
+
+	ret = vd56g3_parse_dt(sensor);
+	if (ret) {
+		dev_err(&client->dev, "Failed to parse Device Tree : %d", ret);
+		return ret;
+	}
+
+	/* Get (and check) ressources : power regs, ext clock, reset gpio */
+	ret = vd56g3_get_regulators(sensor);
+	if (ret)
+		return dev_err_probe(dev, ret, "Failed to get regulators.");
+
+	sensor->xclk = devm_clk_get(dev, NULL);
+	if (IS_ERR(sensor->xclk))
+		return dev_err_probe(dev, PTR_ERR(sensor->xclk),
+				     "Failed to get xclk.");
 	sensor->clk_freq = clk_get_rate(sensor->xclk);
 	if (sensor->clk_freq < 6 * HZ_PER_MHZ ||
 	    sensor->clk_freq > 27 * HZ_PER_MHZ) {
@@ -2338,79 +2435,53 @@ static int vd56g3_probe(struct i2c_client *client)
 		return -EINVAL;
 	}
 
-	v4l2_i2c_subdev_init(&sensor->sd, client, &vd56g3_subdev_ops);
-	sensor->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
-	sensor->pad.flags = MEDIA_PAD_FL_SOURCE;
-	sensor->sd.entity.ops = &vd56g3_subdev_entity_ops;
-	sensor->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
+	sensor->reset_gpio =
+		devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
+	if (IS_ERR(sensor->reset_gpio))
+		return dev_err_probe(dev, PTR_ERR(sensor->reset_gpio),
+				     "Failed to get reset gpio.");
 
-	ret = media_entity_pads_init(&sensor->sd.entity, 1, &sensor->pad);
+	/* Power ON */
+	ret = vd56g3_power_on(sensor);
 	if (ret) {
-		dev_err(&client->dev, "pads init failed %d", ret);
+		dev_err(&client->dev, "Sensor power on failed : %d", ret);
 		return ret;
 	}
 
-	sensor->reset_gpio =
-		devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
-
-	ret = vd56g3_get_regulators(sensor);
-	if (ret) {
-		dev_err(&client->dev, "failed to get regulators %d", ret);
-		goto err_clean_entity;
-	}
-
-	mutex_init(&sensor->lock);
-
-	ret = vd56g3_power_on(sensor);
-	if (ret) {
-		dev_err(&client->dev, "sensor power on failed %d", ret);
-		goto err_clean_entity;
-	}
-
-	// TODO : drop if possible
-	// Preset sensor internal to avoid NULL reference while calling
-	// vd56g3_init_controls()
-	sensor->current_mode = &vd56g3_supported_modes[0];
-	sensor->fmt.code = vd56g3_mbus_codes[0][0];
-	ret = vd56g3_update_vblank(sensor,
-				   VD56G3_FRAME_LENGTH_DEF_60FPS -
-					   sensor->current_mode->crop.height);
-	if (ret) {
-		dev_err(&client->dev, "Vblank initialization failed %d", ret);
-		goto err_power_off;
-	}
-
-	ret = vd56g3_init_controls(sensor);
-	if (ret) {
-		dev_err(&client->dev, "controls initialization failed %d", ret);
-		goto err_power_off;
-	}
-
-	// TODO : temporary after vd56g3_init_controls() because at the end
-	// init_cfg make call of set_fmt which update existing controls (thus
-	// may have been initialized first)
-	ret = vd56g3_init_cfg(&sensor->sd, NULL);
-	if (ret) {
-		dev_err(&client->dev, "Init config failed %d", ret);
-		goto err_free_ctrl_handler;
-	}
-
-	// Enable PM runtime with autosuspend (4s corresponding to boot time)
-	// As the device has been already powered manually, mark it as active
+	/* Enable PM runtime with autosuspend (sensor being ON, set active) */
 	pm_runtime_set_active(dev);
 	pm_runtime_get_noresume(dev);
 	pm_runtime_enable(dev);
 	pm_runtime_set_autosuspend_delay(dev, 4000);
 	pm_runtime_use_autosuspend(dev);
 
+	/* Check HW */
+	ret = vd56g3_boot(sensor);
+	if (ret) {
+		dev_err(&client->dev, "Sensor boot failed : %d", ret);
+		goto err_power_off;
+	}
+
+	ret = vd56g3_detect(sensor);
+	if (ret) {
+		dev_err(&client->dev, "Sensor detect failed : %d", ret);
+		goto err_power_off;
+	}
+
+	/* Initialize, then register V4L2 subdev. */
+	ret = vd56g3_subdev_init(sensor);
+	if (ret) {
+		dev_err(&client->dev, "V4l2 init failed : %d", ret);
+		goto err_power_off;
+	}
+
 	ret = v4l2_async_register_subdev(&sensor->sd);
 	if (ret) {
 		dev_err(&client->dev, "async subdev register failed %d", ret);
-		goto err_free_ctrl_handler;
+		goto err_subdev;
 	}
 
-	// Decrease the PM usage count. The device will get suspended after the
-	// autosuspend delay, turning the power off
+	/* Sensor could now be powered off (after the autosuspend delay) */
 	pm_runtime_mark_last_busy(dev);
 	pm_runtime_put_autosuspend(dev);
 
@@ -2418,15 +2489,12 @@ static int vd56g3_probe(struct i2c_client *client)
 
 	return 0;
 
-err_free_ctrl_handler:
-	v4l2_ctrl_handler_free(sensor->sd.ctrl_handler);
+err_subdev:
+	vd56g3_subdev_cleanup(sensor);
 err_power_off:
 	pm_runtime_disable(dev);
 	pm_runtime_put_noidle(dev);
 	vd56g3_power_off(sensor);
-err_clean_entity:
-	mutex_destroy(&sensor->lock);
-	media_entity_cleanup(&sensor->sd.entity);
 	return ret;
 }
 
@@ -2435,10 +2503,7 @@ static int vd56g3_remove(struct i2c_client *client)
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct vd56g3 *sensor = to_vd56g3(sd);
 
-	v4l2_async_unregister_subdev(&sensor->sd);
-	mutex_destroy(&sensor->lock);
-	media_entity_cleanup(&sensor->sd.entity);
-	v4l2_ctrl_handler_free(sensor->sd.ctrl_handler);
+	vd56g3_subdev_cleanup(sensor);
 
 	pm_runtime_disable(&client->dev);
 	if (!pm_runtime_status_suspended(&client->dev))
