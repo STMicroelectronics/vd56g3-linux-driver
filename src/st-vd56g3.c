@@ -78,6 +78,9 @@ int dev_err_probe(const struct device *dev, int err, const char *fmt, ...)
 #define VD56G3_SYSTEM_FSM_SW_STBY			0x02
 #define VD56G3_SYSTEM_FSM_STREAMING			0x03
 #define VD56G3_REG_TEMPERATURE				VD56G3_REG_16BIT(0x004c)
+#define VD56G3_REG_APPLIED_COARSE_EXPOSURE		VD56G3_REG_16BIT(0x0064)
+#define VD56G3_REG_APPLIED_ANALOG_GAIN			VD56G3_REG_8BIT(0x0068)
+#define VD56G3_REG_APPLIED_DIGITAL_GAIN			VD56G3_REG_16BIT(0x006A)
 #define VD56G3_REG_BOOT					VD56G3_REG_8BIT(0x0200)
 #define VD56G3_CMD_ACK					0
 #define VD56G3_CMD_BOOT					1
@@ -112,7 +115,10 @@ int dev_err_probe(const struct device *dev, int err, const char *fmt, ...)
 #define VD56G3_EXP_MODE_MANUAL				2
 #define VD56G3_REG_MANUAL_ANALOG_GAIN			VD56G3_REG_8BIT(0x044d)
 #define VD56G3_REG_MANUAL_COARSE_EXPOSURE		VD56G3_REG_16BIT(0x044e)
-#define VD56G3_REG_MANUAL_DIGITAL_GAIN			VD56G3_REG_16BIT(0x0450)
+#define VD56G3_REG_MANUAL_DIGITAL_GAIN_CH0		VD56G3_REG_16BIT(0x0450)
+#define VD56G3_REG_MANUAL_DIGITAL_GAIN_CH1		VD56G3_REG_16BIT(0x0452)
+#define VD56G3_REG_MANUAL_DIGITAL_GAIN_CH2		VD56G3_REG_16BIT(0x0454)
+#define VD56G3_REG_MANUAL_DIGITAL_GAIN_CH3		VD56G3_REG_16BIT(0x0456)
 #define VD56G3_REG_FRAME_LENGTH				VD56G3_REG_16BIT(0x0458)
 #define VD56G3_REG_OUT_ROI_X_START			VD56G3_REG_16BIT(0x045e)
 #define VD56G3_REG_OUT_ROI_X_END			VD56G3_REG_16BIT(0x0460)
@@ -365,13 +371,24 @@ struct vd56g3 {
 	struct v4l2_ctrl *pixel_rate_ctrl;
 	struct v4l2_ctrl *hblank_ctrl;
 	struct v4l2_ctrl *vblank_ctrl;
-	struct v4l2_ctrl *expo_ctrl;
-	struct v4l2_ctrl *hflip_ctrl;
-	struct v4l2_ctrl *vflip_ctrl;
+	struct {
+		struct v4l2_ctrl *hflip_ctrl;
+		struct v4l2_ctrl *vflip_ctrl;
+	};
+	struct {
+		struct v4l2_ctrl *ae_ctrl;
+		struct v4l2_ctrl *expo_ctrl;
+		struct v4l2_ctrl *again_ctrl;
+		struct v4l2_ctrl *dgain_ctrl;
+	};
+	struct v4l2_ctrl *ae_lock_ctrl;
+	struct v4l2_ctrl *ae_bias_ctrl;
+	struct v4l2_ctrl *ae_target_ctrl;
+	struct v4l2_ctrl *ae_step_prop_ctrl;
+	struct v4l2_ctrl *ae_leak_prop_ctrl;
 	bool streaming;
 	struct v4l2_mbus_framefmt fmt;
 	const struct vd56g3_mode *current_mode;
-	enum vd56g3_expo_state expo_state;
 };
 
 static inline struct vd56g3 *to_vd56g3(struct v4l2_subdev *sd)
@@ -677,46 +694,49 @@ static int vd56g3_update_patgen(struct vd56g3 *sensor, u32 index)
 	return vd56g3_write(sensor, VD56G3_REG_PATGEN_CTRL, reg, NULL);
 }
 
-static int vd56g3_update_exposure_auto(struct vd56g3 *sensor, u32 index)
+static int vd56g3_update_expo_cluster(struct vd56g3 *sensor, bool is_auto)
 {
 	int ret = 0;
+	enum vd56g3_expo_state expo_state = is_auto ? VD56G3_EXP_MODE_AUTO :
+						      VD56G3_EXP_MODE_MANUAL;
 
-	/* VD56G3_EXPO_AUTO_FREEZE => VD56G3_EXPO_MANUAL is invalid */
-	if (sensor->expo_state == VD56G3_EXPO_AUTO_FREEZE &&
-	    index == V4L2_EXPOSURE_MANUAL)
-		return -EINVAL;
+	if (sensor->ae_ctrl->is_new)
+		vd56g3_write(sensor, VD56G3_REG_EXP_MODE, expo_state, &ret);
 
-	switch (index) {
-	case V4L2_EXPOSURE_AUTO:
-		vd56g3_write(sensor, VD56G3_REG_EXP_MODE, VD56G3_EXP_MODE_AUTO,
-			     &ret);
-		sensor->expo_state = VD56G3_EXPO_AUTO;
-		break;
-	case V4L2_EXPOSURE_MANUAL:
-		vd56g3_write(sensor, VD56G3_REG_EXP_MODE,
-			     VD56G3_EXP_MODE_MANUAL, &ret);
-		sensor->expo_state = VD56G3_EXPO_MANUAL;
-		break;
-	default:
-		ret = -EINVAL;
+	// In Manual expo, set exposure, analog and digital gains
+	if (!is_auto && sensor->expo_ctrl->is_new)
+		vd56g3_write(sensor, VD56G3_REG_MANUAL_COARSE_EXPOSURE,
+			     sensor->expo_ctrl->val, &ret);
+
+	if (!is_auto && sensor->again_ctrl->is_new)
+		vd56g3_write(sensor, VD56G3_REG_MANUAL_ANALOG_GAIN,
+			     sensor->again_ctrl->val, &ret);
+
+	if (!is_auto && sensor->dgain_ctrl->is_new) {
+		vd56g3_write(sensor, VD56G3_REG_MANUAL_DIGITAL_GAIN_CH0,
+			     sensor->dgain_ctrl->val, &ret);
+		vd56g3_write(sensor, VD56G3_REG_MANUAL_DIGITAL_GAIN_CH1,
+			     sensor->dgain_ctrl->val, &ret);
+		vd56g3_write(sensor, VD56G3_REG_MANUAL_DIGITAL_GAIN_CH2,
+			     sensor->dgain_ctrl->val, &ret);
+		vd56g3_write(sensor, VD56G3_REG_MANUAL_DIGITAL_GAIN_CH3,
+			     sensor->dgain_ctrl->val, &ret);
 	}
 
 	return ret;
 }
 
-static int vd56g3_lock_exposure(struct vd56g3 *sensor, u32 is_lock)
+static int vd56g3_lock_exposure(struct vd56g3 *sensor, u32 lock_val)
 {
-	/* only exposure lock is supported */
-	if ((is_lock & 1) != is_lock)
-		return -EINVAL;
+	bool ae_lock = lock_val & V4L2_LOCK_EXPOSURE;
+	enum vd56g3_expo_state expo_state = ae_lock ? VD56G3_EXP_MODE_FREEZE :
+						      VD56G3_EXP_MODE_AUTO;
+	int ret = 0;
 
-	/* we can't lock / unlock if we are in manual mode */
-	if (sensor->expo_state == VD56G3_EXPO_MANUAL)
-		return -EINVAL;
+	if (sensor->ae_ctrl->val == V4L2_EXPOSURE_AUTO)
+		vd56g3_write(sensor, VD56G3_REG_EXP_MODE, expo_state, &ret);
 
-	return vd56g3_write(
-		sensor, VD56G3_REG_EXP_MODE,
-		is_lock ? VD56G3_EXP_MODE_FREEZE : VD56G3_EXP_MODE_AUTO, NULL);
+	return ret;
 }
 
 static int vd56g3_update_gpiox_strobe_mode(struct vd56g3 *sensor, u32 mode,
@@ -794,7 +814,10 @@ static int vd56g3_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 	struct vd56g3 *sensor = to_vd56g3(sd);
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	int temperature;
-	int ret;
+	int exposure;
+	int again;
+	int dgain;
+	int ret = 0;
 
 	/* Interact with HW only when it is powered ON */
 	if (!pm_runtime_get_if_in_use(&client->dev))
@@ -805,7 +828,25 @@ static int vd56g3_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 		ret = vd56g3_get_temp(sensor, &temperature);
 		if (ret)
 			break;
-		ret = __v4l2_ctrl_s_ctrl(ctrl, temperature);
+		ctrl->val = temperature;
+		break;
+	case V4L2_CID_EXPOSURE_AUTO:
+		exposure =
+			vd56g3_read(sensor, VD56G3_REG_APPLIED_COARSE_EXPOSURE);
+		ret = (exposure < 0) ? exposure : 0;
+		if (ret)
+			break;
+		sensor->expo_ctrl->val = exposure;
+		again = vd56g3_read(sensor, VD56G3_REG_APPLIED_ANALOG_GAIN);
+		ret = (again < 0) ? again : 0;
+		if (ret)
+			break;
+		sensor->again_ctrl->val = again;
+		dgain = vd56g3_read(sensor, VD56G3_REG_APPLIED_DIGITAL_GAIN);
+		ret = (dgain < 0) ? dgain : 0;
+		if (ret)
+			break;
+		sensor->dgain_ctrl->val = dgain;
 		break;
 	default:
 		ret = -EINVAL;
@@ -825,17 +866,30 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	unsigned int frame_length;
 	unsigned int expo_max;
+	bool is_auto;
 	int ret;
 
 	if (ctrl->flags & V4L2_CTRL_FLAG_READ_ONLY)
 		return 0;
 
-	/* Exposure range changes with vblank */
-	if (ctrl->id == V4L2_CID_VBLANK) {
+	/* Update controls state, range, etc. whatever the state of the HW*/
+	switch (ctrl->id) {
+	case V4L2_CID_VBLANK:
 		frame_length = sensor->current_mode->crop.height + ctrl->val;
 		expo_max = frame_length - VD56G3_EXPOSURE_OFFSET;
 		__v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max, 1,
 					 VD56G3_EXPOSURE_DEFAULT);
+		break;
+	case V4L2_CID_EXPOSURE_AUTO:
+		is_auto = (ctrl->val == V4L2_EXPOSURE_AUTO);
+		__v4l2_ctrl_grab(sensor->ae_lock_ctrl, !is_auto);
+		__v4l2_ctrl_grab(sensor->ae_bias_ctrl, !is_auto);
+		__v4l2_ctrl_grab(sensor->ae_target_ctrl, !is_auto);
+		__v4l2_ctrl_grab(sensor->ae_step_prop_ctrl, !is_auto);
+		__v4l2_ctrl_grab(sensor->ae_leak_prop_ctrl, !is_auto);
+		break;
+	default:
+		break;
 	}
 
 	/* Interact with HW only when it is powered ON */
@@ -843,7 +897,6 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 		return 0;
 
 	switch (ctrl->id) {
-	case V4L2_CID_VFLIP:
 	case V4L2_CID_HFLIP:
 		ret = vd56g3_write(sensor, VD56G3_REG_ORIENTATION,
 				   sensor->hflip_ctrl->val |
@@ -854,19 +907,7 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 		ret = vd56g3_update_patgen(sensor, ctrl->val);
 		break;
 	case V4L2_CID_EXPOSURE_AUTO:
-		ret = vd56g3_update_exposure_auto(sensor, ctrl->val);
-		break;
-	case V4L2_CID_ANALOGUE_GAIN:
-		ret = vd56g3_write(sensor, VD56G3_REG_MANUAL_ANALOG_GAIN,
-				   ctrl->val, NULL);
-		break;
-	case V4L2_CID_DIGITAL_GAIN:
-		ret = vd56g3_write(sensor, VD56G3_REG_MANUAL_DIGITAL_GAIN,
-				   ctrl->val, NULL);
-		break;
-	case V4L2_CID_EXPOSURE:
-		ret = vd56g3_write(sensor, VD56G3_REG_MANUAL_COARSE_EXPOSURE,
-				   ctrl->val, NULL);
+		ret = vd56g3_update_expo_cluster(sensor, is_auto);
 		break;
 	case V4L2_CID_3A_LOCK:
 		ret = vd56g3_lock_exposure(sensor, ctrl->val);
@@ -1239,24 +1280,29 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 	if (ctrl)
 		ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 
-	v4l2_ctrl_new_std_menu(hdl, ops, V4L2_CID_EXPOSURE_AUTO,
-			       V4L2_EXPOSURE_MANUAL, 0, V4L2_EXPOSURE_AUTO);
+	sensor->ae_ctrl = v4l2_ctrl_new_std_menu(hdl, ops,
+						 V4L2_CID_EXPOSURE_AUTO,
+						 V4L2_EXPOSURE_MANUAL, 0,
+						 V4L2_EXPOSURE_AUTO);
 
-	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_3A_LOCK, 0, 7, 0, 0);
+	sensor->ae_lock_ctrl =
+		v4l2_ctrl_new_std(hdl, ops, V4L2_CID_3A_LOCK, 0, 7, 0, 0);
 
-	v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_AUTO_EXPOSURE_BIAS,
-			       ARRAY_SIZE(vd56g3_ev_bias_qmenu) - 1,
-			       (ARRAY_SIZE(vd56g3_ev_bias_qmenu) + 1) / 2 - 1,
-			       vd56g3_ev_bias_qmenu);
+	sensor->ae_bias_ctrl = v4l2_ctrl_new_int_menu(
+		hdl, ops, V4L2_CID_AUTO_EXPOSURE_BIAS,
+		ARRAY_SIZE(vd56g3_ev_bias_qmenu) - 1,
+		(ARRAY_SIZE(vd56g3_ev_bias_qmenu) + 1) / 2 - 1,
+		vd56g3_ev_bias_qmenu);
 
 	/*
 	 * Analog gain [1, 8] is computed with the following logic :
 	 * 32/(32 − again_reg), with again_reg in the range [0:28]
 	 * Digital gain [1.00, 8.00] is coded as a Fixed Point 5.8
 	 */
-	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_ANALOGUE_GAIN, 0, 28, 1, 0);
-	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_DIGITAL_GAIN, 0x100, 0x800, 1,
-			  0x100);
+	sensor->again_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_ANALOGUE_GAIN,
+					       0, 28, 1, 0);
+	sensor->dgain_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_DIGITAL_GAIN,
+					       0x100, 0x800, 1, 0x100);
 
 	/*
 	 * Set the pixel rate, exposure, horizontal and vertical blanking ctrls
@@ -1288,14 +1334,20 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio6_ctrl, NULL);
 	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio7_ctrl, NULL);
 
-	v4l2_ctrl_new_custom(hdl, &vd56g3_ae_target_ctrl, NULL);
-	v4l2_ctrl_new_custom(hdl, &vd56g3_ae_step_prop_ctrl, NULL);
-	v4l2_ctrl_new_custom(hdl, &vd56g3_ae_leak_prop_ctrl, NULL);
+	sensor->ae_target_ctrl =
+		v4l2_ctrl_new_custom(hdl, &vd56g3_ae_target_ctrl, NULL);
+	sensor->ae_step_prop_ctrl =
+		v4l2_ctrl_new_custom(hdl, &vd56g3_ae_step_prop_ctrl, NULL);
+	sensor->ae_leak_prop_ctrl =
+		v4l2_ctrl_new_custom(hdl, &vd56g3_ae_leak_prop_ctrl, NULL);
 
 	if (hdl->error) {
 		ret = hdl->error;
 		goto free_ctrls;
 	}
+
+	v4l2_ctrl_cluster(2, &sensor->hflip_ctrl);
+	v4l2_ctrl_auto_cluster(4, &sensor->ae_ctrl, V4L2_EXPOSURE_MANUAL, true);
 
 	sensor->sd.ctrl_handler = hdl;
 	return 0;
@@ -2238,7 +2290,6 @@ static int vd56g3_subdev_init(struct vd56g3 *sensor)
 
 	mutex_init(&sensor->lock);
 	sensor->streaming = false;
-	sensor->expo_state = VD56G3_EXPO_AUTO;
 	sensor->current_mode = &vd56g3_supported_modes[0];
 	sensor->fmt.code = vd56g3_mbus_codes[0][0];
 
