@@ -104,6 +104,9 @@ int dev_err_probe(const struct device *dev, int err, const char *fmt, ...)
 #define VD56G3_REG_OIF_CSI_BITRATE			VD56G3_REG_16BIT(0x0312)
 #define VD56G3_REG_ISL_ENABLE				VD56G3_REG_8BIT(0x0333)
 #define VD56G3_REG_PATGEN_CTRL				VD56G3_REG_16BIT(0x0400)
+#define VD56G3_REG_AE_COLDSTART_COARSE_EXPOSURE		VD56G3_REG_16BIT(0x042A)
+#define VD56G3_REG_AE_COLDSTART_ANALOG_GAIN		VD56G3_REG_8BIT(0x042C)
+#define VD56G3_REG_AE_COLDSTART_DIGITAL_GAIN		VD56G3_REG_16BIT(0x042E)
 #define VD56G3_REG_AE_COMPILER_CONTROL			VD56G3_REG_8BIT(0x0430)
 #define VD56G3_REG_AE_COMPENSATION			VD56G3_REG_16BIT(0x043A)
 #define VD56G3_REG_AE_TARGET_PERCENTAGE			VD56G3_REG_16BIT(0x043C)
@@ -681,6 +684,43 @@ static int vd56g3_get_temp(struct vd56g3 *sensor, int *temp)
 		return vd56g3_get_temp_stream_disable(sensor, temp);
 }
 
+static int vd56g3_get_expo_cluster(struct vd56g3 *sensor, bool force_cur_val)
+{
+	int exposure;
+	int again;
+	int dgain;
+
+	/* When 'force_cur_val' is enabled, save the ctrl value in 'cur.val'
+	 * instead of the normal 'val', this is used during poweroff to cache
+	 * volatile ctrls and enable coldstart.
+	 */
+	exposure = vd56g3_read(sensor, VD56G3_REG_APPLIED_COARSE_EXPOSURE);
+	if (exposure < 0)
+		return exposure;
+	if (force_cur_val)
+		sensor->expo_ctrl->cur.val = exposure;
+	else
+		sensor->expo_ctrl->val = exposure;
+
+	again = vd56g3_read(sensor, VD56G3_REG_APPLIED_ANALOG_GAIN);
+	if (again < 0)
+		return again;
+	if (force_cur_val)
+		sensor->again_ctrl->cur.val = again;
+	else
+		sensor->again_ctrl->val = again;
+
+	dgain = vd56g3_read(sensor, VD56G3_REG_APPLIED_DIGITAL_GAIN);
+	if (dgain < 0)
+		return dgain;
+	if (force_cur_val)
+		sensor->dgain_ctrl->cur.val = dgain;
+	else
+		sensor->dgain_ctrl->val = dgain;
+
+	return 0;
+}
+
 static int vd56g3_update_patgen(struct vd56g3 *sensor, u32 index)
 {
 	u32 pattern = index <= 3 ? index : index + 12;
@@ -701,6 +741,16 @@ static int vd56g3_update_expo_cluster(struct vd56g3 *sensor, bool is_auto)
 
 	if (sensor->ae_ctrl->is_new)
 		vd56g3_write(sensor, VD56G3_REG_EXP_MODE, expo_state, &ret);
+
+	// In Auto expo, set coldstart parameters
+	if (is_auto && sensor->ae_ctrl->is_new) {
+		vd56g3_write(sensor, VD56G3_REG_AE_COLDSTART_COARSE_EXPOSURE,
+			     sensor->expo_ctrl->val, &ret);
+		vd56g3_write(sensor, VD56G3_REG_AE_COLDSTART_ANALOG_GAIN,
+			     sensor->again_ctrl->val, &ret);
+		vd56g3_write(sensor, VD56G3_REG_AE_COLDSTART_DIGITAL_GAIN,
+			     sensor->dgain_ctrl->val, &ret);
+	}
 
 	// In Manual expo, set exposure, analog and digital gains
 	if (!is_auto && sensor->expo_ctrl->is_new)
@@ -753,9 +803,6 @@ static int vd56g3_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 	struct vd56g3 *sensor = to_vd56g3(sd);
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	int temperature;
-	int exposure;
-	int again;
-	int dgain;
 	int ret = 0;
 
 	/* Interact with HW only when it is powered ON */
@@ -770,22 +817,7 @@ static int vd56g3_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 		ctrl->val = temperature;
 		break;
 	case V4L2_CID_EXPOSURE_AUTO:
-		exposure =
-			vd56g3_read(sensor, VD56G3_REG_APPLIED_COARSE_EXPOSURE);
-		ret = (exposure < 0) ? exposure : 0;
-		if (ret)
-			break;
-		sensor->expo_ctrl->val = exposure;
-		again = vd56g3_read(sensor, VD56G3_REG_APPLIED_ANALOG_GAIN);
-		ret = (again < 0) ? again : 0;
-		if (ret)
-			break;
-		sensor->again_ctrl->val = again;
-		dgain = vd56g3_read(sensor, VD56G3_REG_APPLIED_DIGITAL_GAIN);
-		ret = (dgain < 0) ? dgain : 0;
-		if (ret)
-			break;
-		sensor->dgain_ctrl->val = dgain;
+		ret = vd56g3_get_expo_cluster(sensor, false);
 		break;
 	default:
 		ret = -EINVAL;
@@ -1353,6 +1385,11 @@ static int vd56g3_stream_on(struct vd56g3 *sensor)
 static int vd56g3_stream_off(struct vd56g3 *sensor)
 {
 	int ret;
+
+	/* Retrieve Expo cluster to enable coldstart of AE*/
+	ret = vd56g3_get_expo_cluster(sensor, true);
+	if (ret)
+		return ret;
 
 	ret = vd56g3_write(sensor, VD56G3_REG_STREAMING, VD56G3_CMD_STOP_STREAM,
 			   NULL);
