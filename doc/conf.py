@@ -17,12 +17,12 @@
 
 # -- Project information -----------------------------------------------------
 
-project = 'Fox Driver'
-copyright = '2021, ST Microelectronics'
+project = 'VD56G3 Driver'
+copyright = '2021-23, ST Microelectronics'
 author = 'SP'
 
 # The full version, including alpha/beta/rc tags
-release = '0.3.0'
+release = 'doc-0.4'
 
 
 # -- General configuration ---------------------------------------------------
@@ -82,7 +82,7 @@ rst_prolog = """
 latex_engine = 'pdflatex'
 
 latex_elements = {
-    'releasename': '\\mbox{}', 
+    'releasename': '\\mbox{}',
     'preamble': r'''
 \usepackage{draftwatermark}
 \SetWatermarkText{ST CONFIDENTIAL}

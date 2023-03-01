@@ -193,7 +193,7 @@ struct vd56g3_mode {
 /**
  * DOC: Supported Modes
  *
- * The vd56g3 driver supports 9 modes described in the next table :
+ * The vd56g3 driver supports 9 modes described below :
  *
  * ======= ======== ============
  *  Width   Height   Binning
@@ -209,9 +209,9 @@ struct vd56g3_mode {
  *    240      320   Binning x4
  * ======= ======== ============
  *
- * The selection of the desired resolution is done through standard
- * V4L2 API. VD56G3 driver implements common camera-type operations (see below
- * the list of supported V4L2 operations).
+ * Each mode defaults to 60FPS. In addition, the framerate could be adjusted in
+ * a continuous manner up to 88FPS (making use of the ``V4L2_CID_VBLANK``
+ * control).
  */
 
 static const struct vd56g3_mode vd56g3_supported_modes[] = {
@@ -583,7 +583,6 @@ static const char *const vd56g3_ae_flicker_freq[] = {
 	"60Hz",
 };
 
-/* Supported exposure bias values (-4.0EV .. +4.0EV) */
 static const s64 vd56g3_ev_bias_qmenu[] = { -4000, -3500, -3000, -2500, -2000,
 					    -1500, -1000, -500,	 0,	500,
 					    1000,  1500,  2000,	 2500,	3000,
@@ -747,66 +746,6 @@ static int vd56g3_update_gpiox_strobe_mode(struct vd56g3 *sensor, u32 mode,
 	return vd56g3_write(sensor, VD56G3_REG_GPIO_0_CTRL + idx, regs[mode],
 			    NULL);
 }
-
-/**
- * DOC: V4L2 supported Controls
- *
- * The vd56g3 driver implements the following list of standard V4L2 controls.
- *
- * ================================= ===========================================
- *  Standard V4L2 Control             Description
- * ================================= ===========================================
- *  ``V4L2_CID_PIXEL_RATE``           Pixel rate (mandatory for a `CSI transmitter`_)
- *  ``V4L2_CID_LINK_FREQ``            Link frequency (mandatory for a `CSI transmitter`_)
- *  ``V4L2_CID_VFLIP``                Vertical flip (see `V4L2 User Controls`_)
- *  ``V4L2_CID_HFLIP``                Horizontal flip (see `V4L2 User Controls`_)
- *  ``V4L2_CID_TEST_PATTERN``         Test pattern generation (see `V4L2 Image Process Controls`_)
- *  ``V4L2_CID_EXPOSURE_AUTO``        Auto Exposure (see `V4L2 Camera Controls`_)
- *  ``V4L2_CID_3A_LOCK``              Lock/Unlock auto expo (see `V4L2 Camera Controls`_)
- *  ``V4L2_CID_AUTO_EXPOSURE_BIAS``   `AE - Exposure compensation`_
- *  ``V4L2_CID_GAIN``                 Gain setting when auto expo is disabled (see `V4L2 User Controls`_)
- *  ``V4L2_CID_EXPOSURE``             Exposure setting when auto expo is disabled (see `V4L2 User Controls`_)
- * ================================= ===========================================
- *
- * In addition to standard V4L2 control, the vd56g3 driver also defines specific custom controls.
- *
- * ====================================== ======================================
- *  Custom V4L2 Control                    Description
- * ====================================== ======================================
- *  ``V4L2_CID_GPIO0_MODE``	           `GPIO0 mode selection Control`_
- *  ``V4L2_CID_GPIO1_MODE``                `GPIO1 mode selection Control`_
- *  ``V4L2_CID_GPIO2_MODE``                `GPIO2 mode selection Control`_
- *  ``V4L2_CID_GPIO3_MODE``                `GPIO3 mode selection Control`_
- *  ``V4L2_CID_GPIO4_MODE``                `GPIO4 mode selection Control`_
- *  ``V4L2_CID_GPIO5_MODE``                `GPIO5 mode selection Control`_
- *  ``V4L2_CID_GPIO6_MODE``                `GPIO6 mode selection Control`_
- *  ``V4L2_CID_GPIO7_MODE``                `GPIO7 mode selection Control`_
- *  ``V4L2_CID_TEMPERATURE``               `Temperature Control`_
- *  ``V4L2_CID_AE_TARGET_PERCENTAGE``      `AE - Light level target (%)`_
- *  ``V4L2_CID_AE_STEP_PROPORTION``        `AE - Convergence step proportion`_
- *  ``V4L2_CID_AE_LEAK_PROPORTION``        `AE - Convergence leak proportion`_
- * ====================================== ======================================
- *
- * .. _CSI transmitter: https://www.kernel.org/doc/html/latest/driver-api/media/csi2.html
- * .. _V4L2 User Controls: https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/control.html?#control-ids
- * .. _V4L2 Image Process Controls: https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/ext-ctrls-image-process.html?#image-process-control-ids
- * .. _V4L2 Camera Controls: https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/ext-ctrls-camera.html?#camera-control-ids
- */
-
-/**
- * DOC: AE - Exposure compensation
- *
- * Determines the automatic exposure compensation (see `V4L2 Camera Controls`_).
- *
- * Supported exposure bias values in range -4.0EV .. +4.0EV.
- *
- * The control expresses the values as 0.001 EV units, where the value 1000 stands for +1 EV
- *
- * :id:         ``V4L2_CID_AUTO_EXPOSURE_BIAS``
- * :type:       ``V4L2_CTRL_TYPE_INTEGER_MENU``
- * :qmenu_int:  -4000, -3500, -3000, -2500, -2000, -1500, -1000, -500, 0, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000
- * :def:        0
- */
 
 static int vd56g3_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 {
@@ -1357,29 +1296,6 @@ free_ctrls:
 	return ret;
 }
 
-/**
- * DOC: V4L2 exposed Operations
- *
- * **This sections contains all vd56g3 operations exposed through standard V4L2 API**
- *
- * See below the supported callbacks (categorized following V4L2 classification):
- *
- * - ``v4l2_subdev_core_ops``. **core ops** callbacks for subdev
- *
- *      + no callback defined here
- *
- * - ``v4l2_subdev_video_ops``: **video-related** callbacks
- *
- *      + vd56g3_s_stream(). V4L2 notification that a video stream will start or has stopped.
- *
- * - ``v4l2_subdev_pad_ops``: **pad-level** callbacks
- *
- *      + vd56g3_enum_mbus_code(). Callback to enumerate available media bus formats
- *      + vd56g3_get_fmt() - Callback to get the frame format of specific subdev pads
- *      + vd56g3_set_fmt() - Callback to set a given frame format
- *      + vd56g3_enum_frame_size(). Callback to enumerate supported frame sizes
- */
-
 /* ----------------------------------------------------------------------------
  * Videos ops
  */
@@ -1454,11 +1370,6 @@ static int vd56g3_stream_off(struct vd56g3 *sensor)
 	return 0;
 }
 
-/**
- * vd56g3_s_stream - Callback notifying the streaming start
- * @sd: v4l2 subdevice entry point
- * @enable: enable or disable stream
- */
 static int vd56g3_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	struct vd56g3 *sensor = to_vd56g3(sd);
@@ -1535,17 +1446,6 @@ endloops:
 	return vd56g3_mbus_codes[i_bpp][j];
 }
 
-/**
- * vd56g3_enum_mbus_code - Callback to enumerate available media bus formats
- * @sd: v4l2 subdevice entry point
- * @cfg: struct used for storing subdev pad information
- * @code: pointer to struct v4l2_subdev_mbus_code_enum that the driver will fill
- * with the available mbus format
- *
- * This callback enables to enumerate media bus formats available at a given
- * sub-device pad. It will be triggered upon the VIDIOC_SUBDEV_ENUM_MBUS_CODE()
- * ioctl call.
- */
 static int vd56g3_enum_mbus_code(struct v4l2_subdev *sd,
 #if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
 				 struct v4l2_subdev_pad_config *cfg,
@@ -1565,17 +1465,6 @@ static int vd56g3_enum_mbus_code(struct v4l2_subdev *sd,
 	return 0;
 }
 
-/**
- * vd56g3_enum_frame_size - Callback to enumerate supported frame sizes
- * @sd: v4l2 subdevice entry point
- * @cfg: struct used for storing subdev pad information
- * @fse: pointer to struct v4l2_subdev_frame_size_enum that the driver will fill
- * with the supported frame size
- *
- * This callback enables to enumerate all frame sizes supported by a sub-device
- * on the given pad for the given media bus format.
- * It will be triggered upon the VIDIOC_SUBDEV_ENUM_FRAME_SIZE() ioctl call.
- */
 static int vd56g3_enum_frame_size(struct v4l2_subdev *sd,
 #if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
 				  struct v4l2_subdev_pad_config *cfg,
@@ -1601,16 +1490,6 @@ static int vd56g3_enum_frame_size(struct v4l2_subdev *sd,
 	return 0;
 }
 
-/**
- * vd56g3_get_fmt - Callback to get the frame format of specific subdev pads
- * @sd: v4l2 subdevice entry point
- * @cfg: struct used for storing subdev pad information
- * @format: the v4l2_subdev_format struct for which format field will be filled
- * by the driver
- *
- * This callback enables to retrieve the frame format.
- * It will be triggered upon the VIDIOC_SUBDEV_G_FMT() ioctl call.
- */
 static int vd56g3_get_fmt(struct v4l2_subdev *sd,
 #if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
 			  struct v4l2_subdev_pad_config *cfg,
@@ -1680,15 +1559,6 @@ static int vd56g3_try_fmt_internal(struct v4l2_subdev *sd,
 	return 0;
 }
 
-/**
- * vd56g3_set_fmt - Callback to set a given frame format
- * @sd: v4l2 subdevice entry point
- * @cfg: struct used for storing subdev pad information
- * @format: the format to set
- *
- * This callback enables to change the format with the given @format value.
- * It will be triggered upon the VIDIOC_SUBDEV_S_FMT() ioctl call.
- */
 static int vd56g3_set_fmt(struct v4l2_subdev *sd,
 #if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
 			  struct v4l2_subdev_pad_config *cfg,
