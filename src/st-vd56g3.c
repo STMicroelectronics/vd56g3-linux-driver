@@ -105,6 +105,7 @@ int dev_err_probe(const struct device *dev, int err, const char *fmt, ...)
 #define VD56G3_REG_OIF_CSI_BITRATE			VD56G3_REG_16BIT(0x0312)
 #define VD56G3_REG_ISL_ENABLE				VD56G3_REG_8BIT(0x0333)
 #define VD56G3_REG_PATGEN_CTRL				VD56G3_REG_16BIT(0x0400)
+#define VD56G3_REG_DARKCAL_PEDESTAL			VD56G3_REG_8BIT(0x0415)
 #define VD56G3_REG_AE_COLDSTART_COARSE_EXPOSURE		VD56G3_REG_16BIT(0x042A)
 #define VD56G3_REG_AE_COLDSTART_ANALOG_GAIN		VD56G3_REG_8BIT(0x042C)
 #define VD56G3_REG_AE_COLDSTART_DIGITAL_GAIN		VD56G3_REG_16BIT(0x042E)
@@ -151,7 +152,8 @@ int dev_err_probe(const struct device *dev, int err, const char *fmt, ...)
 #define V4L2_CID_AE_TARGET_PERCENTAGE		(V4L2_CID_USER_BASE | 0x1021)
 #define V4L2_CID_AE_STEP_PROPORTION		(V4L2_CID_USER_BASE | 0x1022)
 #define V4L2_CID_AE_LEAK_PROPORTION		(V4L2_CID_USER_BASE | 0x1023)
-#define V4L2_CID_SLAVE_MODE			(V4L2_CID_USER_BASE | 0x1024)
+#define V4L2_CID_DARKCAL_PEDESTAL		(V4L2_CID_USER_BASE | 0x1024)
+#define V4L2_CID_SLAVE_MODE			(V4L2_CID_USER_BASE | 0x1025)
 /* parse-SNAP: */
 
 #include "st-vd56g3_patch_cut2.c"
@@ -567,15 +569,6 @@ static const char *const vd56g3_test_pattern_menu[] = {
 	"PN28"
 };
 
-static const char *const vd56g3_ae_mode[] = {
-	"Priority to minimum gain",
-	"Priority to flicker free",
-};
-
-static const char *const vd56g3_ae_flicker_freq[] = {
-	"50Hz",
-	"60Hz",
-};
 
 static const s64 vd56g3_ev_bias_qmenu[] = { -4000, -3500, -3000, -2500, -2000,
 					    -1500, -1000, -500,	 0,	500,
@@ -920,6 +913,10 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 		ret = vd56g3_write(sensor, VD56G3_REG_AE_LEAK_PROPORTION,
 				   ctrl->val, NULL);
 		break;
+	case V4L2_CID_DARKCAL_PEDESTAL:
+		ret = vd56g3_write(sensor, VD56G3_REG_DARKCAL_PEDESTAL,
+				   ctrl->val, NULL);
+		break;
 	default:
 		ret = -EINVAL;
 		break;
@@ -1045,6 +1042,30 @@ static const struct v4l2_ctrl_config vd56g3_ae_leak_prop_ctrl = {
 };
 
 /**
+ * DOC: Dark Calibration Pedestal
+ *
+ * The device embeds an automatic dark calibration mechanism.
+ * This controls allows to set the dark calibration target.
+ *
+ * :id:     ``V4L2_CID_DARKCAL_PEDESTAL``
+ * :type:   ``V4L2_CTRL_TYPE_INTEGER``
+ * :min:    0
+ * :max:    255
+ * :def:    64
+ *
+ */
+static const struct v4l2_ctrl_config vd56g3_darkcal_pedestal_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_DARKCAL_PEDESTAL,
+	.name		= "Dark Calibration Pedestal",
+	.type		= V4L2_CTRL_TYPE_INTEGER,
+	.min		= 0,
+	.max		= 255,
+	.step		= 1,
+	.def		= 0x40,
+};
+
+/**
  * DOC: VT Slave Mode Control
  *
  * When the 'st,in-sync' property of the device tree is enabled on gpio0,
@@ -1164,7 +1185,7 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 	sensor->vblank_ctrl =
 		v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VBLANK, 1, 1, 1, 1);
 
-	/* Custom controls : temperature, custom AE ctrls */
+	/* Custom controls : temperature, custom AE ctrls, pedestal */
 	ctrl = v4l2_ctrl_new_custom(hdl, &vd56g3_temp_ctrl, NULL);
 	if (ctrl)
 		ctrl->flags |= V4L2_CTRL_FLAG_VOLATILE |
@@ -1175,6 +1196,7 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 		v4l2_ctrl_new_custom(hdl, &vd56g3_ae_step_prop_ctrl, NULL);
 	sensor->ae_leak_prop_ctrl =
 		v4l2_ctrl_new_custom(hdl, &vd56g3_ae_leak_prop_ctrl, NULL);
+	v4l2_ctrl_new_custom(hdl, &vd56g3_darkcal_pedestal_ctrl, NULL);
 
 	/* Addition controls based on device tree properties */
 	if (sensor->ext_vt_sync)
