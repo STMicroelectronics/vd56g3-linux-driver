@@ -144,6 +144,7 @@ int dev_err_probe(const struct device *dev, int err, const char *fmt, ...)
 #define VD56G3_FRAME_LENGTH_DEF_60FPS			2168				// (1/60)/(line_length/pixel_clk) // TODO : check line_length and pixel_clk at runtime
 #define VD56G3_EXPOSURE_OFFSET				(68 + 7)			// EXP_COARSE_INTG_MARGIN + 7
 #define VD56G3_EXPOSURE_DEFAULT				1420
+#define VD56G3_MAX_CSI_DATA_LANES			2
 #define VD56G3_WRITE_MULTIPLE_CHUNK_MAX			16				// TODO : unecessary
 
 /* parse-SNIP: Custom-CIDs*/
@@ -2036,17 +2037,14 @@ static const struct dev_pm_ops vd56g3_pm_ops = { SET_RUNTIME_PM_OPS(
  * Probe and initialization
  */
 
-static int vd56g3_rx_from_ep(struct vd56g3 *sensor,
-			     struct fwnode_handle *endpoint)
+static int vd56g3_check_csi_lanes(struct vd56g3 *sensor,
+				  struct fwnode_handle *endpoint)
 {
 	struct i2c_client *client = sensor->i2c_client;
 	struct v4l2_fwnode_endpoint *ep;
-	u32 log2phy[3] = { ~0, ~0, ~0 };
-	u32 phy2log[3] = { ~0, ~0, ~0 };
-	int polarities[3] = { 0, 0, 0 };
-	int l_nb;
+	u32 phy_data_lanes[VD56G3_MAX_CSI_DATA_LANES] = { ~0, ~0 };
+	int n_lanes;
 	int p, l;
-	int i;
 
 #if KERNEL_VERSION(4, 20, 0) >= LINUX_VERSION_CODE
 	ep = v4l2_fwnode_endpoint_alloc_parse(endpoint);
@@ -2063,83 +2061,68 @@ static int vd56g3_rx_from_ep(struct vd56g3 *sensor,
 		return -EINVAL;
 #endif
 
-	l_nb = ep->bus.mipi_csi2.num_data_lanes;
-	if (l_nb != 1 && l_nb != 2) {
-		dev_err(&client->dev, "invalid data lane number %d\n", l_nb);
-		goto error_ep;
+	// Check lanes number
+	n_lanes = ep->bus.mipi_csi2.num_data_lanes;
+	if (n_lanes != 1 && n_lanes != 2) {
+		dev_err(&client->dev, "Invalid data lane number %d\n", n_lanes);
+		ret = -EINVAL;
+		goto done;
 	}
 
-	/* build  log2phy, phy2log and polarities from ep info */
-	log2phy[0] = ep->bus.mipi_csi2.clock_lane;
-	phy2log[log2phy[0]] = 0;
-	for (l = 1; l < l_nb + 1; l++) {
-		log2phy[l] = ep->bus.mipi_csi2.data_lanes[l - 1];
-		phy2log[log2phy[l]] = l;
+	// Clock lane must be first
+	if (ep->bus.mipi_csi2.clock_lane != 0) {
+		dev_err(&client->dev, "Clk lane must be mapped to lane 0\n");
+		ret = -EINVAL;
+		goto done;
 	}
-	/*
-	 * then fill remaining slots for every physical slot have something
-	 * valid for hardware stuff.
-	 */
-	for (p = 0; p < 3; p++) {
-		if (phy2log[p] != ~0)
+
+	// build phy_data_lanes given endpoint info
+	for (l = 0; l < n_lanes; l++)
+		phy_data_lanes[ep->bus.mipi_csi2.data_lanes[l] - 1] = l;
+	// fill remaining slots to have something valid for hw stuff
+	for (p = 0; p < VD56G3_MAX_CSI_DATA_LANES; p++) {
+		if (phy_data_lanes[p] != ~0)
 			continue;
-		phy2log[p] = l;
-		log2phy[l] = p;
+		phy_data_lanes[p] = l;
 		l++;
 	}
-	for (l = 0; l < l_nb + 1; l++)
-		polarities[l] = ep->bus.mipi_csi2.lane_polarities[l];
 
-	if (log2phy[0] != 0) {
-		dev_err(&client->dev,
-			"clk lane must be map to physical lane 0\n");
-		goto error_ep;
-	}
-	sensor->oif_ctrl = l_nb | (polarities[0] << 3) |
-			   ((phy2log[1] - 1) << 4) | (polarities[1] << 6) |
-			   ((phy2log[2] - 1) << 7) | (polarities[2] << 9);
-	sensor->nb_of_lane = l_nb;
+	sensor->oif_ctrl = n_lanes |
+			   (ep->bus.mipi_csi2.lane_polarities[0] << 3) |
+			   ((phy_data_lanes[0]) << 4) |
+			   (ep->bus.mipi_csi2.lane_polarities[1] << 6) |
+			   ((phy_data_lanes[1]) << 7) |
+			   (ep->bus.mipi_csi2.lane_polarities[2] << 9);
+	sensor->nb_of_lane = n_lanes;
+	ret = 0;
 
-	dev_dbg(&client->dev, "rx use %d lanes", l_nb);
-	for (i = 0; i < 3; i++) {
-		dev_dbg(&client->dev, "log2phy[%d] = %d", i, log2phy[i]);
-		dev_dbg(&client->dev, "phy2log[%d] = %d", i, phy2log[i]);
-		dev_dbg(&client->dev, "polarity[%d] = %d", i, polarities[i]);
-	}
-	dev_dbg(&client->dev, "oif_ctrl = 0x%04x\n", sensor->oif_ctrl);
-
+done:
 	v4l2_fwnode_endpoint_free(ep);
-
-	return 0;
-
-error_ep:
-	v4l2_fwnode_endpoint_free(ep);
-	return -EINVAL;
+	return ret;
 }
 
 static int vd56g3_parse_dt(struct vd56g3 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
 	struct device *dev = &client->dev;
-	struct fwnode_handle *handle;
+	struct fwnode_handle *endpoint;
 	int ret;
 
 #if KERNEL_VERSION(5, 2, 0) >= LINUX_VERSION_CODE
-	handle = fwnode_graph_get_next_endpoint(of_fwnode_handle(dev->of_node),
-						NULL);
+	endpoint = fwnode_graph_get_next_endpoint(
+		of_fwnode_handle(dev->of_node), NULL);
 #else
-	handle = fwnode_graph_get_endpoint_by_id(dev_fwnode(dev), 0, 0, 0);
+	endpoint = fwnode_graph_get_endpoint_by_id(dev_fwnode(dev), 0, 0, 0);
 #endif
-	if (!handle) {
-		dev_err(dev, "handle node not found\n");
+	if (!endpoint) {
+		dev_err(dev, "endpoint node not found\n");
 		return -EINVAL;
 	}
-	ret = vd56g3_rx_from_ep(sensor, handle);
-	fwnode_handle_put(handle);
-	if (ret) {
-		dev_err(dev, "Failed to parse handle %d\n", ret);
+
+	ret = vd56g3_check_csi_lanes(sensor, endpoint);
+	fwnode_handle_put(endpoint);
+	if (ret)
 		return ret;
-	}
 
 	return 0;
 }
