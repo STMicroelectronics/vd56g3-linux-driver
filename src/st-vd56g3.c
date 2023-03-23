@@ -97,6 +97,7 @@ int dev_err_probe(const struct device *dev, int err, const char *fmt, ...)
 #define VD56G3_REG_CLK_PLL_PREDIV			VD56G3_REG_8BIT(0x0224)
 #define VD56G3_REG_CLK_SYS_PLL_MULT			VD56G3_REG_8BIT(0x0226)
 #define VD56G3_REG_ORIENTATION				VD56G3_REG_8BIT(0x0302)
+#define VD56G3_REG_VT_CTRL				VD56G3_REG_8BIT(0x0309)
 #define VD56G3_REG_FORMAT_CTRL				VD56G3_REG_8BIT(0x030a)
 #define VD56G3_REG_OIF_CTRL				VD56G3_REG_16BIT(0x030c)
 #define VD56G3_REG_OIF_IMG_CTRL				VD56G3_REG_8BIT(0x030f)
@@ -128,13 +129,10 @@ int dev_err_probe(const struct device *dev, int err, const char *fmt, ...)
 #define VD56G3_REG_OUT_ROI_Y_START			VD56G3_REG_16BIT(0x0462)
 #define VD56G3_REG_OUT_ROI_Y_END			VD56G3_REG_16BIT(0x0464)
 #define VD56G3_REG_GPIO_0_CTRL				VD56G3_REG_8BIT(0x0467)
-#define VD56G3_REG_GPIO_1_CTRL				VD56G3_REG_8BIT(0x0468)
-#define VD56G3_REG_GPIO_2_CTRL				VD56G3_REG_8BIT(0x0469)
-#define VD56G3_REG_GPIO_3_CTRL				VD56G3_REG_8BIT(0x046a)
-#define VD56G3_REG_GPIO_4_CTRL				VD56G3_REG_8BIT(0x046b)
-#define VD56G3_REG_GPIO_5_CTRL				VD56G3_REG_8BIT(0x046c)
-#define VD56G3_REG_GPIO_6_CTRL				VD56G3_REG_8BIT(0x046d)
-#define VD56G3_REG_GPIO_7_CTRL				VD56G3_REG_8BIT(0x046e)
+#define VD56G3_GPIOX_FSYNC_OUT				0x00
+#define VD56G3_GPIOX_GPIO_IN				0x01
+#define VD56G3_GPIOX_STROBE_MODE			0x02
+#define VD56G3_GPIOX_VT_SLAVE_MODE			0x0a
 #define VD56G3_REG_READOUT_CTRL				VD56G3_REG_8BIT(0x047e)
 
 #define VD56G3_MAX_WIDTH				1120
@@ -145,22 +143,15 @@ int dev_err_probe(const struct device *dev, int err, const char *fmt, ...)
 #define VD56G3_EXPOSURE_OFFSET				(68 + 7)			// EXP_COARSE_INTG_MARGIN + 7
 #define VD56G3_EXPOSURE_DEFAULT				1420
 #define VD56G3_MAX_CSI_DATA_LANES			2
+#define VD56G3_NB_GPIOS					8
 #define VD56G3_WRITE_MULTIPLE_CHUNK_MAX			16				// TODO : unecessary
 
 /* parse-SNIP: Custom-CIDs*/
-#define V4L2_CID_GPIO0_MODE			(V4L2_CID_USER_BASE | 0x1010)
-#define V4L2_CID_GPIO1_MODE			(V4L2_CID_USER_BASE | 0x1011)
-#define V4L2_CID_GPIO2_MODE			(V4L2_CID_USER_BASE | 0x1012)
-#define V4L2_CID_GPIO3_MODE			(V4L2_CID_USER_BASE | 0x1013)
-#define V4L2_CID_GPIO4_MODE			(V4L2_CID_USER_BASE | 0x1014)
-#define V4L2_CID_GPIO5_MODE			(V4L2_CID_USER_BASE | 0x1015)
-#define V4L2_CID_GPIO6_MODE			(V4L2_CID_USER_BASE | 0x1016)
-#define V4L2_CID_GPIO7_MODE			(V4L2_CID_USER_BASE | 0x1017)
-
 #define V4L2_CID_TEMPERATURE			(V4L2_CID_USER_BASE | 0x1020)
 #define V4L2_CID_AE_TARGET_PERCENTAGE		(V4L2_CID_USER_BASE | 0x1021)
 #define V4L2_CID_AE_STEP_PROPORTION		(V4L2_CID_USER_BASE | 0x1022)
 #define V4L2_CID_AE_LEAK_PROPORTION		(V4L2_CID_USER_BASE | 0x1023)
+#define V4L2_CID_SLAVE_MODE			(V4L2_CID_USER_BASE | 0x1024)
 /* parse-SNAP: */
 
 #include "st-vd56g3_patch_cut2.c"
@@ -368,6 +359,9 @@ struct vd56g3 {
 	int nb_of_lane;
 	int data_rate_in_mbps;
 	int pclk;
+	u32 gpios[VD56G3_NB_GPIOS];
+	bool ext_vt_sync;
+	unsigned long ext_leds_mask;
 	bool is_rgb;
 	/* lock to protect all members below */
 	struct mutex lock;
@@ -390,6 +384,8 @@ struct vd56g3 {
 	struct v4l2_ctrl *ae_target_ctrl;
 	struct v4l2_ctrl *ae_step_prop_ctrl;
 	struct v4l2_ctrl *ae_leak_prop_ctrl;
+	struct v4l2_ctrl *slave_ctrl;
+	struct v4l2_ctrl *led_ctrl;
 	bool streaming;
 	struct v4l2_mbus_framefmt fmt;
 	const struct vd56g3_mode *current_mode;
@@ -569,12 +565,6 @@ static const char *const vd56g3_test_pattern_menu[] = {
 	"Vgrey",
 	"Dgrey",
 	"PN28"
-};
-
-static const char *const vd56g3_gpios_modes[] = {
-	"disabled",
-	"strobe envelope positive",
-	"strobe envelope negative",
 };
 
 static const char *const vd56g3_ae_mode[] = {
@@ -789,13 +779,28 @@ static int vd56g3_lock_exposure(struct vd56g3 *sensor, u32 lock_val)
 	return ret;
 }
 
-static int vd56g3_update_gpiox_strobe_mode(struct vd56g3 *sensor, u32 mode,
-					   int idx)
+static int vd56g3_write_gpiox(struct vd56g3 *sensor, unsigned long gpio_mask)
 {
-	u8 regs[ARRAY_SIZE(vd56g3_gpios_modes)] = { 0x01, 0x02, 0x22 };
+	unsigned long io;
+	u32 gpio_val;
+	int ret = 0;
 
-	return vd56g3_write(sensor, VD56G3_REG_GPIO_0_CTRL + idx, regs[mode],
-			    NULL);
+	for_each_set_bit(io, &gpio_mask, VD56G3_NB_GPIOS) {
+		gpio_val = sensor->gpios[io];
+
+		if ((gpio_val == VD56G3_GPIOX_VT_SLAVE_MODE) &&
+		    !sensor->slave_ctrl->val)
+			gpio_val = VD56G3_GPIOX_GPIO_IN;
+
+		if ((gpio_val == VD56G3_GPIOX_STROBE_MODE) &&
+		    sensor->led_ctrl->val == V4L2_FLASH_LED_MODE_NONE)
+			gpio_val = VD56G3_GPIOX_GPIO_IN;
+
+		vd56g3_write(sensor, VD56G3_REG_GPIO_0_CTRL + io, gpio_val,
+			     &ret);
+	}
+
+	return ret;
 }
 
 static int vd56g3_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
@@ -896,16 +901,12 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 		ret = vd56g3_write(sensor, VD56G3_REG_FRAME_LENGTH,
 				   frame_length, NULL);
 		break;
-	case V4L2_CID_GPIO0_MODE:
-	case V4L2_CID_GPIO1_MODE:
-	case V4L2_CID_GPIO2_MODE:
-	case V4L2_CID_GPIO3_MODE:
-	case V4L2_CID_GPIO4_MODE:
-	case V4L2_CID_GPIO5_MODE:
-	case V4L2_CID_GPIO6_MODE:
-	case V4L2_CID_GPIO7_MODE:
-		ret = vd56g3_update_gpiox_strobe_mode(
-			sensor, ctrl->val, ctrl->id - V4L2_CID_GPIO0_MODE);
+	case V4L2_CID_SLAVE_MODE:
+		ret = vd56g3_write_gpiox(sensor, BIT(0));
+		ret = vd56g3_write(sensor, VD56G3_REG_VT_CTRL, ctrl->val, &ret);
+		break;
+	case V4L2_CID_FLASH_LED_MODE:
+		ret = vd56g3_write_gpiox(sensor, sensor->ext_leds_mask);
 		break;
 	case V4L2_CID_AE_TARGET_PERCENTAGE:
 		ret = vd56g3_write(sensor, VD56G3_REG_AE_TARGET_PERCENTAGE,
@@ -933,158 +934,6 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 static const struct v4l2_ctrl_ops vd56g3_ctrl_ops = {
 	.g_volatile_ctrl = vd56g3_g_volatile_ctrl,
 	.s_ctrl = vd56g3_s_ctrl,
-};
-
-/**
- * DOC: GPIO0 mode selection Control
- *
- * :id:     ``V4L2_CID_GPIO0_MODE``
- * :type:   ``V4L2_CTRL_TYPE_MENU``
- * :qmenu:  "disabled", "strobe envelope positive", "strobe envelope negative"
- * :def:    "disabled"
- *
- */
-static const struct v4l2_ctrl_config vd56g3_gpio0_ctrl = {
-	.ops		= &vd56g3_ctrl_ops,
-	.id		= V4L2_CID_GPIO0_MODE,
-	.name		= "Gpio0 mode",
-	.type		= V4L2_CTRL_TYPE_MENU,
-	.max		= ARRAY_SIZE(vd56g3_gpios_modes) - 1,
-	.qmenu		= vd56g3_gpios_modes,
-	.def		= 0,
-};
-
-/**
- * DOC: GPIO1 mode selection Control
- *
- * :id:     ``V4L2_CID_GPIO1_MODE``
- * :type:   ``V4L2_CTRL_TYPE_MENU``
- * :qmenu:  "disabled", "strobe envelope positive", "strobe envelope negative"
- * :def:    "disabled"
- *
- */
-static const struct v4l2_ctrl_config vd56g3_gpio1_ctrl = {
-	.ops		= &vd56g3_ctrl_ops,
-	.id		= V4L2_CID_GPIO1_MODE,
-	.name		= "Gpio1 mode",
-	.type		= V4L2_CTRL_TYPE_MENU,
-	.max		= ARRAY_SIZE(vd56g3_gpios_modes) - 1,
-	.qmenu		= vd56g3_gpios_modes,
-	.def		= 0,
-};
-
-/**
- * DOC: GPIO2 mode selection Control
- *
- * :id:     ``V4L2_CID_GPIO2_MODE``
- * :type:   ``V4L2_CTRL_TYPE_MENU``
- * :qmenu:  "disabled", "strobe envelope positive", "strobe envelope negative"
- * :def:    "disabled"
- *
- */
-static const struct v4l2_ctrl_config vd56g3_gpio2_ctrl = {
-	.ops		= &vd56g3_ctrl_ops,
-	.id		= V4L2_CID_GPIO2_MODE,
-	.name		= "Gpio2 mode",
-	.type		= V4L2_CTRL_TYPE_MENU,
-	.max		= ARRAY_SIZE(vd56g3_gpios_modes) - 1,
-	.qmenu		= vd56g3_gpios_modes,
-	.def		= 0,
-};
-
-/**
- * DOC: GPIO3 mode selection Control
- *
- * :id:     ``V4L2_CID_GPIO3_MODE``
- * :type:   ``V4L2_CTRL_TYPE_MENU``
- * :qmenu:  "disabled", "strobe envelope positive", "strobe envelope negative"
- * :def:    "disabled"
- *
- */
-static const struct v4l2_ctrl_config vd56g3_gpio3_ctrl = {
-	.ops		= &vd56g3_ctrl_ops,
-	.id		= V4L2_CID_GPIO3_MODE,
-	.name		= "Gpio3 mode",
-	.type		= V4L2_CTRL_TYPE_MENU,
-	.max		= ARRAY_SIZE(vd56g3_gpios_modes) - 1,
-	.qmenu		= vd56g3_gpios_modes,
-	.def		= 0,
-};
-
-/**
- * DOC: GPIO4 mode selection Control
- *
- * :id:     ``V4L2_CID_GPIO4_MODE``
- * :type:   ``V4L2_CTRL_TYPE_MENU``
- * :qmenu:  "disabled", "strobe envelope positive", "strobe envelope negative"
- * :def:    "disabled"
- *
- */
-static const struct v4l2_ctrl_config vd56g3_gpio4_ctrl = {
-	.ops		= &vd56g3_ctrl_ops,
-	.id		= V4L2_CID_GPIO4_MODE,
-	.name		= "Gpio4 mode",
-	.type		= V4L2_CTRL_TYPE_MENU,
-	.max		= ARRAY_SIZE(vd56g3_gpios_modes) - 1,
-	.qmenu		= vd56g3_gpios_modes,
-	.def		= 0,
-};
-
-/**
- * DOC: GPIO5 mode selection Control
- *
- * :id:     ``V4L2_CID_GPIO5_MODE``
- * :type:   ``V4L2_CTRL_TYPE_MENU``
- * :qmenu:  "disabled", "strobe envelope positive", "strobe envelope negative"
- * :def:    "disabled"
- *
- */
-static const struct v4l2_ctrl_config vd56g3_gpio5_ctrl = {
-	.ops		= &vd56g3_ctrl_ops,
-	.id		= V4L2_CID_GPIO5_MODE,
-	.name		= "Gpio5 mode",
-	.type		= V4L2_CTRL_TYPE_MENU,
-	.max		= ARRAY_SIZE(vd56g3_gpios_modes) - 1,
-	.qmenu		= vd56g3_gpios_modes,
-	.def		= 0,
-};
-
-/**
- * DOC: GPIO6 mode selection Control
- *
- * :id:     ``V4L2_CID_GPIO6_MODE``
- * :type:   ``V4L2_CTRL_TYPE_MENU``
- * :qmenu:  "disabled", "strobe envelope positive", "strobe envelope negative"
- * :def:    "disabled"
- *
- */
-static const struct v4l2_ctrl_config vd56g3_gpio6_ctrl = {
-	.ops		= &vd56g3_ctrl_ops,
-	.id		= V4L2_CID_GPIO6_MODE,
-	.name		= "Gpio6 mode",
-	.type		= V4L2_CTRL_TYPE_MENU,
-	.max		= ARRAY_SIZE(vd56g3_gpios_modes) - 1,
-	.qmenu		= vd56g3_gpios_modes,
-	.def		= 0,
-};
-
-/**
- * DOC: GPIO7 mode selection Control
- *
- * :id:     ``V4L2_CID_GPIO7_MODE``
- * :type:   ``V4L2_CTRL_TYPE_MENU``
- * :qmenu:  "disabled", "strobe envelope positive", "strobe envelope negative"
- * :def:    "disabled"
- *
- */
-static const struct v4l2_ctrl_config vd56g3_gpio7_ctrl = {
-	.ops		= &vd56g3_ctrl_ops,
-	.id		= V4L2_CID_GPIO7_MODE,
-	.name		= "Gpio7 mode",
-	.type		= V4L2_CTRL_TYPE_MENU,
-	.max		= ARRAY_SIZE(vd56g3_gpios_modes) - 1,
-	.qmenu		= vd56g3_gpios_modes,
-	.def		= 0,
 };
 
 /**
@@ -1195,6 +1044,30 @@ static const struct v4l2_ctrl_config vd56g3_ae_leak_prop_ctrl = {
 	.step		= 1
 };
 
+/**
+ * DOC: VT Slave Mode Control
+ *
+ * When the 'st,in-sync' property of the device tree is enabled on gpio0,
+ * this control allows to enable/disable the Slave Mode of the sensor
+ *
+ * :id:     ``V4L2_CID_SLAVE``
+ * :type:   ``V4L2_CTRL_TYPE_BOOLEAN``
+ * :min:    False
+ * :max:    True
+ * :def:    True
+ *
+ */
+static const struct v4l2_ctrl_config vd56g3_slave_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_SLAVE_MODE,
+	.name		= "VT Slave Mode",
+	.type		= V4L2_CTRL_TYPE_BOOLEAN,
+	.min		= 0,
+	.max		= 1,
+	.step		= 1,
+	.def		= 1,
+};
+
 static void vd56g3_update_controls(struct vd56g3 *sensor)
 {
 	unsigned int hblank =
@@ -1291,27 +1164,27 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 	sensor->vblank_ctrl =
 		v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VBLANK, 1, 1, 1, 1);
 
-	/* Custom controls : temperature, gpio handling + custom AE ctrls */
+	/* Custom controls : temperature, custom AE ctrls */
 	ctrl = v4l2_ctrl_new_custom(hdl, &vd56g3_temp_ctrl, NULL);
 	if (ctrl)
 		ctrl->flags |= V4L2_CTRL_FLAG_VOLATILE |
 			       V4L2_CTRL_FLAG_READ_ONLY;
-
-	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio0_ctrl, NULL);
-	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio1_ctrl, NULL);
-	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio2_ctrl, NULL);
-	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio3_ctrl, NULL);
-	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio4_ctrl, NULL);
-	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio5_ctrl, NULL);
-	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio6_ctrl, NULL);
-	v4l2_ctrl_new_custom(hdl, &vd56g3_gpio7_ctrl, NULL);
-
 	sensor->ae_target_ctrl =
 		v4l2_ctrl_new_custom(hdl, &vd56g3_ae_target_ctrl, NULL);
 	sensor->ae_step_prop_ctrl =
 		v4l2_ctrl_new_custom(hdl, &vd56g3_ae_step_prop_ctrl, NULL);
 	sensor->ae_leak_prop_ctrl =
 		v4l2_ctrl_new_custom(hdl, &vd56g3_ae_leak_prop_ctrl, NULL);
+
+	/* Addition controls based on device tree properties */
+	if (sensor->ext_vt_sync)
+		sensor->slave_ctrl =
+			v4l2_ctrl_new_custom(hdl, &vd56g3_slave_ctrl, NULL);
+	if (sensor->ext_leds_mask)
+		sensor->led_ctrl = v4l2_ctrl_new_std_menu(
+			hdl, ops, V4L2_CID_FLASH_LED_MODE,
+			V4L2_FLASH_LED_MODE_FLASH, 0,
+			V4L2_FLASH_LED_MODE_FLASH);
 
 	if (hdl->error) {
 		ret = hdl->error;
@@ -1358,6 +1231,11 @@ static int vd56g3_stream_on(struct vd56g3 *sensor)
 	vd56g3_write(sensor, VD56G3_REG_OUT_ROI_Y_START, crop->top, &ret);
 	vd56g3_write(sensor, VD56G3_REG_OUT_ROI_Y_END,
 		     crop->top + crop->height - 1, &ret);
+	if (ret)
+		return ret;
+
+	/* Setup default GPIO values; could be overriden by V4L2 ctrl setup */
+	ret = vd56g3_write_gpiox(sensor, GENMASK(VD56G3_NB_GPIOS - 1, 0));
 	if (ret)
 		return ret;
 
@@ -1441,6 +1319,8 @@ unlock:
 		/* h/v flips locked during streaming */
 		__v4l2_ctrl_grab(sensor->hflip_ctrl, enable);
 		__v4l2_ctrl_grab(sensor->vflip_ctrl, enable);
+		if (sensor->ext_vt_sync)
+			__v4l2_ctrl_grab(sensor->slave_ctrl, enable);
 	}
 
 	return ret;
@@ -2101,6 +1981,101 @@ done:
 	return ret;
 }
 
+static int vd56g3_parse_dt_gpios_array(struct vd56g3 *sensor, char *prop_name,
+				       u32 *array, int *nb)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	struct device_node *np = client->dev.of_node;
+	unsigned int i;
+
+	*nb = of_property_read_variable_u32_array(np, prop_name, array, 0,
+						  VD56G3_NB_GPIOS);
+
+	if (*nb == -EINVAL) {
+		*nb = 0;
+		return *nb;
+	} else if (*nb < 0) {
+		dev_err(&client->dev, "Failed to read %s prop\n", prop_name);
+		return *nb;
+	}
+
+	for (i = 0; i < *nb; i++) {
+		if (array[i] >= VD56G3_NB_GPIOS) {
+			dev_err(&client->dev, "Invalid GPIO : %d\n", array[i]);
+			return -EINVAL;
+		}
+	}
+
+	return 0;
+}
+
+static int vd56g3_parse_dt_gpios(struct vd56g3 *sensor)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	struct device_node *np = client->dev.of_node;
+	u32 led_gpios[VD56G3_NB_GPIOS];
+	int nb_gpios_leds;
+	u32 out_sync_gpios[VD56G3_NB_GPIOS];
+	int nb_gpios_out;
+	u32 in_sync_gpio;
+	int ret;
+	unsigned int i;
+
+	/* Initialize GPIOs to default */
+	for (i = 0; i < VD56G3_NB_GPIOS; i++)
+		sensor->gpios[i] = VD56G3_GPIOX_GPIO_IN;
+	sensor->ext_leds_mask = 0;
+
+	/* Take into account optional 'st,leds' output for GPIOs */
+	ret = vd56g3_parse_dt_gpios_array(sensor, "st,leds", led_gpios,
+					  &nb_gpios_leds);
+	if (ret)
+		return ret;
+
+	for (i = 0; i < nb_gpios_leds; i++) {
+		sensor->gpios[led_gpios[i]] = VD56G3_GPIOX_STROBE_MODE;
+		set_bit(led_gpios[i], &sensor->ext_leds_mask);
+	}
+
+	/* Take into account optional 'st,out-sync' output for GPIOs */
+	ret = vd56g3_parse_dt_gpios_array(sensor, "st,out-sync", out_sync_gpios,
+					  &nb_gpios_out);
+	if (ret)
+		return ret;
+
+	for (i = 0; i < nb_gpios_out; i++) {
+		if (sensor->gpios[out_sync_gpios[i]] != VD56G3_GPIOX_GPIO_IN) {
+			dev_err(&client->dev, "Multiple use of GPIO %d\n",
+				out_sync_gpios[i]);
+			return -EINVAL;
+		}
+		sensor->gpios[out_sync_gpios[i]] = VD56G3_GPIOX_FSYNC_OUT;
+	}
+
+	/* Take into account optional 'st,in-sync' input for GPIO0 */
+	ret = of_property_read_u32(np, "st,in-sync", &in_sync_gpio);
+	if (ret < 0 && ret != -EINVAL) {
+		dev_err(&client->dev, "Failed to read st,in-sync prop\n");
+		return ret;
+	} else if (ret == -EINVAL) {
+		sensor->ext_vt_sync = false;
+	} else {
+		if (in_sync_gpio != 0) {
+			dev_err(&client->dev, "in-sync GPIO must be gpio0\n");
+			return -EINVAL;
+		}
+		if (sensor->gpios[in_sync_gpio] != VD56G3_GPIOX_GPIO_IN) {
+			dev_err(&client->dev, "Multiple use of GPIO %d\n",
+				in_sync_gpio);
+			return -EINVAL;
+		}
+		sensor->gpios[in_sync_gpio] = VD56G3_GPIOX_VT_SLAVE_MODE;
+		sensor->ext_vt_sync = true;
+	}
+
+	return 0;
+}
+
 static int vd56g3_parse_dt(struct vd56g3 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
@@ -2121,6 +2096,10 @@ static int vd56g3_parse_dt(struct vd56g3 *sensor)
 
 	ret = vd56g3_check_csi_lanes(sensor, endpoint);
 	fwnode_handle_put(endpoint);
+	if (ret)
+		return ret;
+
+	ret = vd56g3_parse_dt_gpios(sensor);
 	if (ret)
 		return ret;
 
