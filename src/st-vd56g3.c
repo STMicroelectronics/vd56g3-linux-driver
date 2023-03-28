@@ -101,12 +101,10 @@ int dev_err_probe(const struct device *dev, int err, const char *fmt, ...)
 #define VD56G3_REG_FORMAT_CTRL				VD56G3_REG_8BIT(0x030a)
 #define VD56G3_REG_OIF_CTRL				VD56G3_REG_16BIT(0x030c)
 #define VD56G3_REG_OIF_IMG_CTRL				VD56G3_REG_8BIT(0x030f)
-#define VD56G3_REG_OIF_ISL_CTRL				VD56G3_REG_8BIT(0x0310)
 #define VD56G3_REG_OIF_CSI_BITRATE			VD56G3_REG_16BIT(0x0312)
 #define VD56G3_REG_DUSTER_CTRL				VD56G3_REG_8BIT(0x0318)
 #define VD56G3_DUSTER_DISABLE				0
 #define VD56G3_DUSTER_ENABLE_DEF_MODULES		0x13
-#define VD56G3_REG_ISL_ENABLE				VD56G3_REG_8BIT(0x0333)
 #define VD56G3_REG_DARKCAL_CTRL				VD56G3_REG_8BIT(0x0340)
 #define VD56G3_DARKCAL_ENABLE				1
 #define VD56G3_DARKCAL_DISABLE_DARKAVG			2
@@ -190,7 +188,6 @@ struct vd56g3_mode {
 	u32 height;
 	enum vd56g3_bin_mode bin_mode;
 	struct v4l2_rect crop;
-	int is_isl;
 };
 
 /**
@@ -228,7 +225,6 @@ static const struct vd56g3_mode vd56g3_supported_modes[] = {
 			.width = VD56G3_MAX_WIDTH,
 			.height = VD56G3_MAX_HEIGHT,
 		},
-		.is_isl = 0,
 	},
 	{
 		.width = 1024,
@@ -240,7 +236,6 @@ static const struct vd56g3_mode vd56g3_supported_modes[] = {
 			.width = 1024,
 			.height = 1280,
 		},
-		.is_isl = 0,
 	},
 	{
 		.width = 1024,
@@ -252,7 +247,6 @@ static const struct vd56g3_mode vd56g3_supported_modes[] = {
 			.width = 1024,
 			.height = 768,
 		},
-		.is_isl = 0,
 	},
 	{
 		.width = 768,
@@ -264,7 +258,6 @@ static const struct vd56g3_mode vd56g3_supported_modes[] = {
 			.width = 768,
 			.height = 1024,
 		},
-		.is_isl = 0,
 	},
 	{
 		.width = 720,
@@ -276,7 +269,6 @@ static const struct vd56g3_mode vd56g3_supported_modes[] = {
 			.width = 720,
 			.height = 1280,
 		},
-		.is_isl = 0,
 	},
 	{
 		.width = 640,
@@ -288,7 +280,6 @@ static const struct vd56g3_mode vd56g3_supported_modes[] = {
 			.width = 640,
 			.height = 480,
 		},
-		.is_isl = 0,
 	},
 	{
 		.width = 480,
@@ -300,7 +291,6 @@ static const struct vd56g3_mode vd56g3_supported_modes[] = {
 			.width = 960,
 			.height = 1280,
 		},
-		.is_isl = 0,
 	},
 	{
 		.width = 320,
@@ -312,7 +302,6 @@ static const struct vd56g3_mode vd56g3_supported_modes[] = {
 			.width = 640,
 			.height = 480,
 		},
-		.is_isl = 0,
 	},
 	{
 		.width = 240,
@@ -324,7 +313,6 @@ static const struct vd56g3_mode vd56g3_supported_modes[] = {
 			.width = 960,
 			.height = 1280,
 		},
-		.is_isl = 0,
 	},
 };
 
@@ -575,7 +563,6 @@ static const char *const vd56g3_test_pattern_menu[] = {
 	"Dgrey",
 	"PN28"
 };
-
 
 static const s64 vd56g3_ev_bias_qmenu[] = { -4000, -3500, -3000, -2500, -2000,
 					    -1500, -1000, -500,	 0,	500,
@@ -1248,7 +1235,6 @@ free_ctrls:
 static int vd56g3_stream_on(struct vd56g3 *sensor)
 {
 	const struct v4l2_rect *crop = &sensor->current_mode->crop;
-	int is_isl = sensor->current_mode->is_isl;
 	int ret = 0;
 
 	/* configure output mode */
@@ -1256,10 +1242,6 @@ static int vd56g3_stream_on(struct vd56g3 *sensor)
 		     vd56g3_get_bpp(sensor->fmt.code), &ret);
 	vd56g3_write(sensor, VD56G3_REG_OIF_IMG_CTRL,
 		     vd56g3_get_datatype(sensor->fmt.code), &ret);
-	vd56g3_write(sensor, VD56G3_REG_OIF_ISL_CTRL,
-		     is_isl ? vd56g3_get_datatype(sensor->fmt.code) : 0x12,
-		     &ret);
-	vd56g3_write(sensor, VD56G3_REG_ISL_ENABLE, is_isl, &ret);
 
 	/* configure size and bin mode */
 	vd56g3_write(sensor, VD56G3_REG_READOUT_CTRL,
@@ -1841,7 +1823,6 @@ static int vd56g3_configure(struct vd56g3 *sensor)
 	/* configure interface */
 	vd56g3_write(sensor, VD56G3_REG_OIF_CTRL, sensor->oif_ctrl, &ret);
 	vd56g3_write(sensor, VD56G3_REG_OIF_CSI_BITRATE, 804, &ret);
-	vd56g3_write(sensor, VD56G3_REG_ISL_ENABLE, 0, &ret);
 
 	sensor->data_rate_in_mbps = (mult * sensor->clk_freq) / prediv;
 	sensor->pclk = (sensor->data_rate_in_mbps * 2) / 10;
