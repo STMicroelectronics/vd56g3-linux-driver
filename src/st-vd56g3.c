@@ -103,7 +103,13 @@ int dev_err_probe(const struct device *dev, int err, const char *fmt, ...)
 #define VD56G3_REG_OIF_IMG_CTRL				VD56G3_REG_8BIT(0x030f)
 #define VD56G3_REG_OIF_ISL_CTRL				VD56G3_REG_8BIT(0x0310)
 #define VD56G3_REG_OIF_CSI_BITRATE			VD56G3_REG_16BIT(0x0312)
+#define VD56G3_REG_DUSTER_CTRL				VD56G3_REG_8BIT(0x0318)
+#define VD56G3_DUSTER_DISABLE				0
+#define VD56G3_DUSTER_ENABLE_DEF_MODULES		0x13
 #define VD56G3_REG_ISL_ENABLE				VD56G3_REG_8BIT(0x0333)
+#define VD56G3_REG_DARKCAL_CTRL				VD56G3_REG_8BIT(0x0340)
+#define VD56G3_DARKCAL_ENABLE				1
+#define VD56G3_DARKCAL_DISABLE_DARKAVG			2
 #define VD56G3_REG_PATGEN_CTRL				VD56G3_REG_16BIT(0x0400)
 #define VD56G3_REG_DARKCAL_PEDESTAL			VD56G3_REG_8BIT(0x0415)
 #define VD56G3_REG_AE_COLDSTART_COARSE_EXPOSURE		VD56G3_REG_16BIT(0x042A)
@@ -375,6 +381,7 @@ struct vd56g3 {
 		struct v4l2_ctrl *hflip_ctrl;
 		struct v4l2_ctrl *vflip_ctrl;
 	};
+	struct v4l2_ctrl *patgen_ctrl;
 	struct {
 		struct v4l2_ctrl *ae_ctrl;
 		struct v4l2_ctrl *expo_ctrl;
@@ -705,16 +712,25 @@ static int vd56g3_get_expo_cluster(struct vd56g3 *sensor, bool force_cur_val)
 	return 0;
 }
 
-static int vd56g3_update_patgen(struct vd56g3 *sensor, u32 index)
+static int vd56g3_update_patgen(struct vd56g3 *sensor, u32 patgen_index)
 {
-	u32 pattern = index <= 3 ? index : index + 12;
-	u16 reg;
+	u32 pattern = patgen_index <= 3 ? patgen_index : patgen_index + 12;
+	u16 patgen = pattern << 4;
+	u8 duster = VD56G3_DUSTER_ENABLE_DEF_MODULES;
+	u8 darkcal = VD56G3_DARKCAL_ENABLE;
+	int ret = 0;
 
-	reg = pattern << 4;
-	if (index)
-		reg |= 1;
+	if (patgen_index) {
+		patgen |= 1;
+		duster = VD56G3_DUSTER_DISABLE;
+		darkcal = VD56G3_DARKCAL_DISABLE_DARKAVG;
+	}
 
-	return vd56g3_write(sensor, VD56G3_REG_PATGEN_CTRL, reg, NULL);
+	vd56g3_write(sensor, VD56G3_REG_DUSTER_CTRL, duster, &ret);
+	vd56g3_write(sensor, VD56G3_REG_DARKCAL_CTRL, darkcal, &ret);
+	vd56g3_write(sensor, VD56G3_REG_PATGEN_CTRL, patgen, &ret);
+
+	return ret;
 }
 
 static int vd56g3_update_expo_cluster(struct vd56g3 *sensor, bool is_auto)
@@ -1136,9 +1152,10 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 	if (sensor->vflip_ctrl)
 		sensor->vflip_ctrl->flags |= V4L2_CTRL_FLAG_MODIFY_LAYOUT;
 
-	v4l2_ctrl_new_std_menu_items(hdl, ops, V4L2_CID_TEST_PATTERN,
-				     ARRAY_SIZE(vd56g3_test_pattern_menu) - 1,
-				     0, 0, vd56g3_test_pattern_menu);
+	sensor->patgen_ctrl = v4l2_ctrl_new_std_menu_items(
+		hdl, ops, V4L2_CID_TEST_PATTERN,
+		ARRAY_SIZE(vd56g3_test_pattern_menu) - 1, 0, 0,
+		vd56g3_test_pattern_menu);
 
 	ctrl = v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_LINK_FREQ,
 				      ARRAY_SIZE(vd56g3_link_freq) - 1, 0,
@@ -1338,9 +1355,10 @@ unlock:
 	if (!ret) {
 		sensor->streaming = enable;
 
-		/* h/v flips locked during streaming */
+		/* some controls are locked during streaming */
 		__v4l2_ctrl_grab(sensor->hflip_ctrl, enable);
 		__v4l2_ctrl_grab(sensor->vflip_ctrl, enable);
+		__v4l2_ctrl_grab(sensor->patgen_ctrl, enable);
 		if (sensor->ext_vt_sync)
 			__v4l2_ctrl_grab(sensor->slave_ctrl, enable);
 	}
