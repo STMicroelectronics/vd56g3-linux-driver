@@ -64,6 +64,7 @@ int dev_err_probe(const struct device *dev, int err, const char *fmt, ...)
 #define VD56G3_REG_16BIT(n)		((2 << VD56G3_REG_SIZE_SHIFT) | (n))
 #define VD56G3_REG_32BIT(n)		((4 << VD56G3_REG_SIZE_SHIFT) | (n))
 
+/* Register Map */
 #define VD56G3_REG_MODEL_ID				VD56G3_REG_16BIT(0x0000)
 #define VD56G3_MODEL_ID					0x5603
 #define VD56G3_REG_REVISION				VD56G3_REG_16BIT(0x0002)
@@ -140,15 +141,28 @@ int dev_err_probe(const struct device *dev, int err, const char *fmt, ...)
 #define VD56G3_GPIOX_VT_SLAVE_MODE			0x0a
 #define VD56G3_REG_READOUT_CTRL				VD56G3_REG_8BIT(0x047e)
 
+/* Default Resolution */
 #define VD56G3_MAX_WIDTH				1120
 #define VD56G3_MAX_HEIGHT				1364
-#define VD56G3_LINE_LENGTH_MIN				1236				// 1236 for 10bits ADC (ensure 9bits is never used)
+
+/* PLL settings */
+#define VD56G3_TARGET_PLL				804000000UL
+#define VD56G3_VT_CLOCK_DIV				5
+
+/* Line length and Frame length (for 10bits ADC only) */
+#define VD56G3_LINE_LENGTH_MIN				1236				// 1236 for 10bits ADC (TODO: ensure 9bits is never used)
 #define VD56G3_FRAME_LENGTH_MIN				(VD56G3_MAX_HEIGHT + 69)	// Min Frame Length, Min Vblank, highest FPS
 #define VD56G3_FRAME_LENGTH_DEF_60FPS			2168				// (1/60)/(line_length/pixel_clk) // TODO : check line_length and pixel_clk at runtime
+
+/* Exposure settings */
 #define VD56G3_EXPOSURE_OFFSET				(68 + 7)			// EXP_COARSE_INTG_MARGIN + 7
 #define VD56G3_EXPOSURE_DEFAULT				1420
+
+/* Output Interface settings */
 #define VD56G3_MAX_CSI_DATA_LANES			2
+/* GPIOs */
 #define VD56G3_NB_GPIOS					8
+
 #define VD56G3_WRITE_MULTIPLE_CHUNK_MAX			16				// TODO : unecessary
 
 /* parse-SNIP: Custom-CIDs*/
@@ -350,11 +364,12 @@ struct vd56g3 {
 	struct regulator_bulk_data supplies[VD56G3_NUM_SUPPLIES];
 	struct gpio_desc *reset_gpio;
 	struct clk *xclk;
-	u32 clk_freq;
+	u32 ext_clock;
+	u32 pll_prediv;
+	u32 pll_mult;
+	u32 pixel_clock;
 	u16 oif_ctrl;
 	int nb_of_lane;
-	int data_rate_in_mbps;
-	int pclk;
 	u32 gpios[VD56G3_NB_GPIOS];
 	bool ext_vt_sync;
 	unsigned long ext_leds_mask;
@@ -362,7 +377,6 @@ struct vd56g3 {
 	/* lock to protect all members below */
 	struct mutex lock;
 	struct v4l2_ctrl_handler ctrl_handler;
-	struct v4l2_ctrl *pixel_rate_ctrl;
 	struct v4l2_ctrl *hblank_ctrl;
 	struct v4l2_ctrl *vblank_ctrl;
 	struct {
@@ -616,12 +630,6 @@ static u8 vd56g3_get_datatype(__u32 code)
 	}
 
 	return MIPI_CSI2_DT_RAW8;
-}
-
-static s32 vd56g3_get_pixel_rate(struct vd56g3 *sensor)
-{
-	return div64_u64((u64)sensor->data_rate_in_mbps * sensor->nb_of_lane,
-			 vd56g3_get_bpp(sensor->fmt.code));
 }
 
 static int vd56g3_get_temp_stream_enable(struct vd56g3 *sensor, int *temp)
@@ -1104,9 +1112,7 @@ static void vd56g3_update_controls(struct vd56g3 *sensor)
 	unsigned int frame_length = sensor->current_mode->crop.height + vblank;
 	unsigned int expo_max = frame_length - VD56G3_EXPOSURE_OFFSET;
 
-	/* Update pixelrate, blanking and exposure (ranges + values) */
-	__v4l2_ctrl_s_ctrl_int64(sensor->pixel_rate_ctrl,
-				 vd56g3_get_pixel_rate(sensor));
+	/* Update blanking and exposure (ranges + values) */
 	__v4l2_ctrl_modify_range(sensor->hblank_ctrl, hblank, hblank, 1,
 				 hblank);
 	__v4l2_ctrl_modify_range(sensor->vblank_ctrl, vblank_min, vblank_max, 1,
@@ -1147,6 +1153,9 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 	ctrl = v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_LINK_FREQ,
 				      ARRAY_SIZE(vd56g3_link_freq) - 1, 0,
 				      vd56g3_link_freq);
+	ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_PIXEL_RATE,
+				 sensor->pixel_clock, sensor->pixel_clock, 1,
+				 sensor->pixel_clock);
 	if (ctrl)
 		ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 
@@ -1175,11 +1184,9 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 					       0x100, 0x800, 1, 0x100);
 
 	/*
-	 * Set the pixel rate, exposure, horizontal and vertical blanking ctrls
+	 * Set the exposure, horizontal and vertical blanking ctrls
 	 * to hardcoded values, they will be updated in vd56g3_ctrl_update().
 	 */
-	sensor->pixel_rate_ctrl = v4l2_ctrl_new_std(
-		hdl, ops, V4L2_CID_PIXEL_RATE, 1, INT_MAX, 1, 1);
 	sensor->expo_ctrl =
 		v4l2_ctrl_new_std(hdl, ops, V4L2_CID_EXPOSURE, 1, 1, 1, 1);
 	sensor->hblank_ctrl =
@@ -1237,9 +1244,18 @@ static int vd56g3_stream_on(struct vd56g3 *sensor)
 	const struct v4l2_rect *crop = &sensor->current_mode->crop;
 	int ret = 0;
 
-	/* configure output mode */
+	/* configure clocks */
+	vd56g3_write(sensor, VD56G3_REG_EXT_CLOCK, sensor->ext_clock, &ret);
+	vd56g3_write(sensor, VD56G3_REG_CLK_PLL_PREDIV, sensor->pll_prediv,
+		     &ret);
+	vd56g3_write(sensor, VD56G3_REG_CLK_SYS_PLL_MULT, sensor->pll_mult,
+		     &ret);
+
+	/* configure output */
 	vd56g3_write(sensor, VD56G3_REG_FORMAT_CTRL,
 		     vd56g3_get_bpp(sensor->fmt.code), &ret);
+	vd56g3_write(sensor, VD56G3_REG_OIF_CTRL, sensor->oif_ctrl, &ret);
+	vd56g3_write(sensor, VD56G3_REG_OIF_CSI_BITRATE, 804, &ret);
 	vd56g3_write(sensor, VD56G3_REG_OIF_IMG_CTRL,
 		     vd56g3_get_datatype(sensor->fmt.code), &ret);
 
@@ -1783,57 +1799,6 @@ static int vd56g3_vtpatch(struct vd56g3 *sensor)
  * Power management
  */
 
-static void vd56g3_get_pll_parameters(u32 freq, unsigned int *prediv,
-				      unsigned int *mult)
-{
-	const unsigned int predivs[] = { 1, 2, 4 };
-	int i;
-
-	/*
-	 * freq range is [6Mhz-27Mhz] already checked.
-	 * output of divider should be in [6Mhz-12Mhz[.
-	 */
-	for (i = 0; i < ARRAY_SIZE(predivs); i++) {
-		*prediv = predivs[i];
-		if (freq / *prediv < 12 * HZ_PER_MHZ)
-			break;
-	}
-	WARN_ON(i == ARRAY_SIZE(predivs));
-
-	/*
-	 * target freq is 804Mhz. Don't change this as it will impact image
-	 * quality.
-	 */
-	*mult = ((804 * HZ_PER_MHZ) * (*prediv) + freq / 2) / freq;
-}
-
-static int vd56g3_configure(struct vd56g3 *sensor)
-{
-	struct i2c_client *client = sensor->i2c_client;
-	unsigned int prediv;
-	unsigned int mult;
-	int ret = 0;
-
-	vd56g3_get_pll_parameters(sensor->clk_freq, &prediv, &mult);
-	/* configure clocks */
-	vd56g3_write(sensor, VD56G3_REG_EXT_CLOCK, sensor->clk_freq, &ret);
-	vd56g3_write(sensor, VD56G3_REG_CLK_PLL_PREDIV, prediv, &ret);
-	vd56g3_write(sensor, VD56G3_REG_CLK_SYS_PLL_MULT, mult, &ret);
-
-	/* configure interface */
-	vd56g3_write(sensor, VD56G3_REG_OIF_CTRL, sensor->oif_ctrl, &ret);
-	vd56g3_write(sensor, VD56G3_REG_OIF_CSI_BITRATE, 804, &ret);
-
-	sensor->data_rate_in_mbps = (mult * sensor->clk_freq) / prediv;
-	sensor->pclk = (sensor->data_rate_in_mbps * 2) / 10;
-	dev_dbg(&client->dev, "clock prediv = %d", prediv);
-	dev_dbg(&client->dev, "clock mult = %d", mult);
-	dev_info(&client->dev, "data rate = %d mbps",
-		 sensor->data_rate_in_mbps);
-
-	return 0;
-}
-
 static int vd56g3_power_on(struct vd56g3 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
@@ -1895,12 +1860,6 @@ static int vd56g3_power_patch(struct vd56g3 *sensor)
 	ret = vd56g3_vtpatch(sensor);
 	if (ret) {
 		dev_err(&client->dev, "sensor VT patch failed %d", ret);
-		return ret;
-	}
-
-	ret = vd56g3_configure(sensor);
-	if (ret) {
-		dev_err(&client->dev, "sensor configuration failed %d", ret);
 		return ret;
 	}
 
@@ -2138,6 +2097,47 @@ static int vd56g3_get_regulators(struct vd56g3 *sensor)
 				       VD56G3_NUM_SUPPLIES, sensor->supplies);
 }
 
+static int vd56g3_prepare_clock_tree(struct vd56g3 *sensor)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	const unsigned int predivs[] = { 1, 2, 4 };
+	u32 pll_out;
+	int i;
+
+	/* External clock must be in [6Mhz-27Mhz] */
+	if (sensor->ext_clock < 6 * HZ_PER_MHZ ||
+	    sensor->ext_clock > 27 * HZ_PER_MHZ) {
+		dev_err(&client->dev,
+			"Only 6Mhz-27Mhz clock range supported. provide %lu MHz\n",
+			sensor->ext_clock / HZ_PER_MHZ);
+		return -EINVAL;
+	}
+
+	/* PLL input should be in [6Mhz-12Mhz[ */
+	for (i = 0; i < ARRAY_SIZE(predivs); i++) {
+		sensor->pll_prediv = predivs[i];
+		if (sensor->ext_clock / sensor->pll_prediv < 12 * HZ_PER_MHZ)
+			break;
+	}
+
+	/* PLL output clock must be as close as possible to 804Mhz */
+	sensor->pll_mult = (VD56G3_TARGET_PLL * sensor->pll_prediv +
+			    sensor->ext_clock / 2) /
+			   sensor->ext_clock;
+
+	/* Pixel Clock = PLL Output Clock / VD56G3_VT_CLOCK_DIV ≈ 160.8Mhz */
+	pll_out = sensor->ext_clock * sensor->pll_mult / sensor->pll_prediv;
+	sensor->pixel_clock = pll_out / VD56G3_VT_CLOCK_DIV;
+
+	dev_dbg(&client->dev, "Ext Clock = %d Hz", sensor->ext_clock);
+	dev_dbg(&client->dev, "PLL prediv = %d", sensor->pll_prediv);
+	dev_dbg(&client->dev, "PLL mult = %d", sensor->pll_mult);
+	dev_dbg(&client->dev, "PLL Output = %dHz", pll_out);
+	dev_dbg(&client->dev, "Pixel Clock = %dHz", sensor->pixel_clock);
+
+	return 0;
+}
+
 static int vd56g3_detect(struct vd56g3 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
@@ -2251,14 +2251,10 @@ static int vd56g3_probe(struct i2c_client *client)
 	if (IS_ERR(sensor->xclk))
 		return dev_err_probe(dev, PTR_ERR(sensor->xclk),
 				     "Failed to get xclk.");
-	sensor->clk_freq = clk_get_rate(sensor->xclk);
-	if (sensor->clk_freq < 6 * HZ_PER_MHZ ||
-	    sensor->clk_freq > 27 * HZ_PER_MHZ) {
-		dev_err(dev,
-			"Only 6Mhz-27Mhz clock range supported. provide %lu MHz\n",
-			sensor->clk_freq / HZ_PER_MHZ);
-		return -EINVAL;
-	}
+	sensor->ext_clock = clk_get_rate(sensor->xclk);
+	ret = vd56g3_prepare_clock_tree(sensor);
+	if (ret)
+		return ret;
 
 	sensor->reset_gpio =
 		devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
@@ -2280,7 +2276,7 @@ static int vd56g3_probe(struct i2c_client *client)
 	pm_runtime_set_autosuspend_delay(dev, 4000);
 	pm_runtime_use_autosuspend(dev);
 
-	/* Check HW */
+	/* Check HW model/version */
 	ret = vd56g3_boot(sensor);
 	if (ret) {
 		dev_err(&client->dev, "Sensor boot failed : %d", ret);
