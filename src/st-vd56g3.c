@@ -33,6 +33,7 @@
 
 #if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
 #define HZ_PER_MHZ		1000000UL
+#define MEGA			1000000UL
 #else
 #include <linux/units.h>
 #endif
@@ -160,6 +161,9 @@ int dev_err_probe(const struct device *dev, int err, const char *fmt, ...)
 
 /* Output Interface settings */
 #define VD56G3_MAX_CSI_DATA_LANES			2
+#define VD56G3_LINK_FREQ_DEF_1LANE			750000000UL
+#define VD56G3_LINK_FREQ_DEF_2LANES			402000000UL
+
 /* GPIOs */
 #define VD56G3_NB_GPIOS					8
 
@@ -583,7 +587,9 @@ static const s64 vd56g3_ev_bias_qmenu[] = { -4000, -3500, -3000, -2500, -2000,
 					    1000,  1500,  2000,	 2500,	3000,
 					    3500,  4000 };
 
-static const s64 vd56g3_link_freq[] = { 402000000ULL };
+static const s64 vd56g3_link_freq_1lane[] = { VD56G3_LINK_FREQ_DEF_1LANE };
+
+static const s64 vd56g3_link_freq_2lanes[] = { VD56G3_LINK_FREQ_DEF_2LANES };
 
 static u8 vd56g3_get_bpp(__u32 code)
 {
@@ -1151,8 +1157,13 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 		vd56g3_test_pattern_menu);
 
 	ctrl = v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_LINK_FREQ,
-				      ARRAY_SIZE(vd56g3_link_freq) - 1, 0,
-				      vd56g3_link_freq);
+				      ARRAY_SIZE(vd56g3_link_freq_1lane) - 1, 0,
+				      (sensor->nb_of_lane == 2) ?
+					      vd56g3_link_freq_2lanes :
+					      vd56g3_link_freq_1lane);
+	if (ctrl)
+		ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+
 	ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_PIXEL_RATE,
 				 sensor->pixel_clock, sensor->pixel_clock, 1,
 				 sensor->pixel_clock);
@@ -1243,7 +1254,9 @@ static int vd56g3_stream_on(struct vd56g3 *sensor)
 {
 	const struct v4l2_rect *crop = &sensor->current_mode->crop;
 	int ret = 0;
-
+	unsigned int csi_mbps = ((sensor->nb_of_lane == 2) ?
+					 VD56G3_LINK_FREQ_DEF_2LANES :
+					 VD56G3_LINK_FREQ_DEF_1LANE) * 2 / MEGA;
 	/* configure clocks */
 	vd56g3_write(sensor, VD56G3_REG_EXT_CLOCK, sensor->ext_clock, &ret);
 	vd56g3_write(sensor, VD56G3_REG_CLK_PLL_PREDIV, sensor->pll_prediv,
@@ -1255,7 +1268,7 @@ static int vd56g3_stream_on(struct vd56g3 *sensor)
 	vd56g3_write(sensor, VD56G3_REG_FORMAT_CTRL,
 		     vd56g3_get_bpp(sensor->fmt.code), &ret);
 	vd56g3_write(sensor, VD56G3_REG_OIF_CTRL, sensor->oif_ctrl, &ret);
-	vd56g3_write(sensor, VD56G3_REG_OIF_CSI_BITRATE, 804, &ret);
+	vd56g3_write(sensor, VD56G3_REG_OIF_CSI_BITRATE, csi_mbps, &ret);
 	vd56g3_write(sensor, VD56G3_REG_OIF_IMG_CTRL,
 		     vd56g3_get_datatype(sensor->fmt.code), &ret);
 
@@ -1897,8 +1910,8 @@ static const struct dev_pm_ops vd56g3_pm_ops = { SET_RUNTIME_PM_OPS(
  * Probe and initialization
  */
 
-static int vd56g3_check_csi_lanes(struct vd56g3 *sensor,
-				  struct fwnode_handle *endpoint)
+static int vd56g3_check_csi_conf(struct vd56g3 *sensor,
+				 struct fwnode_handle *endpoint)
 {
 	struct i2c_client *client = sensor->i2c_client;
 	struct v4l2_fwnode_endpoint *ep;
@@ -1928,6 +1941,7 @@ static int vd56g3_check_csi_lanes(struct vd56g3 *sensor,
 		ret = -EINVAL;
 		goto done;
 	}
+	sensor->nb_of_lane = n_lanes;
 
 	// Clock lane must be first
 	if (ep->bus.mipi_csi2.clock_lane != 0) {
@@ -1936,24 +1950,39 @@ static int vd56g3_check_csi_lanes(struct vd56g3 *sensor,
 		goto done;
 	}
 
-	// build phy_data_lanes given endpoint info
+	// Prepare Output Interface conf based on lane settings
+	// logical to physical lane conversion (+ pad remaining slots)
 	for (l = 0; l < n_lanes; l++)
 		phy_data_lanes[ep->bus.mipi_csi2.data_lanes[l] - 1] = l;
-	// fill remaining slots to have something valid for hw stuff
 	for (p = 0; p < VD56G3_MAX_CSI_DATA_LANES; p++) {
 		if (phy_data_lanes[p] != ~0)
 			continue;
 		phy_data_lanes[p] = l;
 		l++;
 	}
-
 	sensor->oif_ctrl = n_lanes |
 			   (ep->bus.mipi_csi2.lane_polarities[0] << 3) |
 			   ((phy_data_lanes[0]) << 4) |
 			   (ep->bus.mipi_csi2.lane_polarities[1] << 6) |
 			   ((phy_data_lanes[1]) << 7) |
 			   (ep->bus.mipi_csi2.lane_polarities[2] << 9);
-	sensor->nb_of_lane = n_lanes;
+
+	// Check link frequency
+	if (!ep->nr_of_link_frequencies) {
+		dev_err(&client->dev, "link-frequency not found in DT\n");
+		ret = -EINVAL;
+		goto done;
+	}
+	if (ep->nr_of_link_frequencies != 1 ||
+	    (ep->link_frequencies[0] != ((n_lanes == 2) ?
+						 VD56G3_LINK_FREQ_DEF_2LANES :
+						 VD56G3_LINK_FREQ_DEF_1LANE))) {
+		dev_err(&client->dev, "Link frequency not supported: %lld\n",
+			ep->link_frequencies[0]);
+		ret = -EINVAL;
+		goto done;
+	}
+
 	ret = 0;
 
 done:
@@ -2074,7 +2103,7 @@ static int vd56g3_parse_dt(struct vd56g3 *sensor)
 		return -EINVAL;
 	}
 
-	ret = vd56g3_check_csi_lanes(sensor, endpoint);
+	ret = vd56g3_check_csi_conf(sensor, endpoint);
 	fwnode_handle_put(endpoint);
 	if (ret)
 		return ret;
