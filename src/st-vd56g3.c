@@ -873,11 +873,21 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	case V4L2_CID_EXPOSURE_AUTO:
 		is_auto = (ctrl->val == V4L2_EXPOSURE_AUTO);
+#if KERNEL_VERSION(4, 20, 0) >= LINUX_VERSION_CODE
+		mutex_unlock(&sensor->lock);
+		v4l2_ctrl_grab(sensor->ae_lock_ctrl, !is_auto);
+		v4l2_ctrl_grab(sensor->ae_bias_ctrl, !is_auto);
+		v4l2_ctrl_grab(sensor->ae_target_ctrl, !is_auto);
+		v4l2_ctrl_grab(sensor->ae_step_prop_ctrl, !is_auto);
+		v4l2_ctrl_grab(sensor->ae_leak_prop_ctrl, !is_auto);
+		mutex_lock(&sensor->lock);
+#else
 		__v4l2_ctrl_grab(sensor->ae_lock_ctrl, !is_auto);
 		__v4l2_ctrl_grab(sensor->ae_bias_ctrl, !is_auto);
 		__v4l2_ctrl_grab(sensor->ae_target_ctrl, !is_auto);
 		__v4l2_ctrl_grab(sensor->ae_step_prop_ctrl, !is_auto);
 		__v4l2_ctrl_grab(sensor->ae_leak_prop_ctrl, !is_auto);
+#endif
 		break;
 	default:
 		break;
@@ -1349,10 +1359,17 @@ static int vd56g3_s_stream(struct v4l2_subdev *sd, int enable)
 	mutex_lock(&sensor->lock);
 
 	if (enable) {
+#if KERNEL_VERSION(5, 5, 0) >= LINUX_VERSION_CODE
+		ret = pm_runtime_get_sync(&client->dev);
+		if (ret < 0) {
+			pm_runtime_put_noidle(&client->dev);
+			goto unlock;
+		}
+#else
 		ret = pm_runtime_resume_and_get(&client->dev);
 		if (ret < 0)
 			goto unlock;
-
+#endif
 		ret = vd56g3_stream_on(sensor);
 		if (ret) {
 			dev_err(&client->dev, "Failed to start streaming\n");
@@ -1371,11 +1388,11 @@ unlock:
 		sensor->streaming = enable;
 
 		/* some controls are locked during streaming */
-		__v4l2_ctrl_grab(sensor->hflip_ctrl, enable);
-		__v4l2_ctrl_grab(sensor->vflip_ctrl, enable);
-		__v4l2_ctrl_grab(sensor->patgen_ctrl, enable);
+		v4l2_ctrl_grab(sensor->hflip_ctrl, enable);
+		v4l2_ctrl_grab(sensor->vflip_ctrl, enable);
+		v4l2_ctrl_grab(sensor->patgen_ctrl, enable);
 		if (sensor->ext_vt_sync)
-			__v4l2_ctrl_grab(sensor->slave_ctrl, enable);
+			v4l2_ctrl_grab(sensor->slave_ctrl, enable);
 	}
 
 	return ret;
@@ -1914,6 +1931,7 @@ static int vd56g3_check_csi_conf(struct vd56g3 *sensor,
 	u32 phy_data_lanes[VD56G3_MAX_CSI_DATA_LANES] = { ~0, ~0 };
 	int n_lanes;
 	int p, l;
+	int ret = 0;
 
 #if KERNEL_VERSION(4, 20, 0) >= LINUX_VERSION_CODE
 	ep = v4l2_fwnode_endpoint_alloc_parse(endpoint);
@@ -1922,7 +1940,6 @@ static int vd56g3_check_csi_conf(struct vd56g3 *sensor,
 #else
 	struct v4l2_fwnode_endpoint ep_node = { .bus_type =
 							V4L2_MBUS_CSI2_DPHY };
-	int ret;
 
 	ep = &ep_node;
 	ret = v4l2_fwnode_endpoint_alloc_parse(endpoint, ep);
@@ -1978,8 +1995,6 @@ static int vd56g3_check_csi_conf(struct vd56g3 *sensor,
 		ret = -EINVAL;
 		goto done;
 	}
-
-	ret = 0;
 
 done:
 	v4l2_fwnode_endpoint_free(ep);
