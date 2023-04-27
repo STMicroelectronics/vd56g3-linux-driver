@@ -22,7 +22,7 @@ copyright = '2021-23, ST Microelectronics'
 author = 'SP'
 
 # The full version, including alpha/beta/rc tags
-release = 'doc-0.4'
+release = 'doc-0.5'
 
 
 # -- General configuration ---------------------------------------------------

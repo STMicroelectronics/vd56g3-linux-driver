@@ -211,7 +211,7 @@ struct vd56g3_mode {
 /**
  * DOC: Supported Modes
  *
- * The vd56g3 driver supports 9 modes described below :
+ * The vd56g3 driver supports 8 modes described below :
  *
  * ======= ======== ============
  *  Width   Height   Binning
@@ -224,7 +224,6 @@ struct vd56g3_mode {
  *    640      480   No Binning
  *    480      640   Binning x2
  *    320      240   Binning x2
- *    240      320   Binning x4
  * ======= ======== ============
  *
  * Each mode defaults to 60FPS. In addition, the framerate could be adjusted in

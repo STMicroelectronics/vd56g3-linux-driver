@@ -18,3 +18,7 @@ Documentation History
 ------------------
 - Remove 'Quickstart' and 'Application Examples' sections
 - Update 'Driver Features' section
+
+[0.5] - 2023.04.27
+------------------
+- Update 'Supported Controls' section following driver updates

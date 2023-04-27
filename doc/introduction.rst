@@ -14,17 +14,16 @@ This document describes the **Linux VD56G3 driver** providing control over the V
     - RAW8 / RAW10 output
     - Embedded auto-exposure
     - Horizontal / Vertical Flip
-
+    - Up to 8 illumination control outputs synchronized with sensor integration periods
+    - Master/Slave mode (for start frame synchronization)
 
 .. Warning ::
 
-    VD56G3's features partially supported in the driver:
+    VD56G3's features partially used in the driver (but not exposed):
 
     - Binning (x2 and x4)
     - Sub sampling (x2 and x4)
     - Crop
-    - 8 multiple function IO, dynamically programmable with frame contexts (GPIO, strobe pulse, pulse-width modulation, V sync)
-    - Up to 8 illumination control outputs synchronized with sensor integration periods and master/slave external frame start
 
 
     VD56G3's features **NOT supported** in the driver:

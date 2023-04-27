@@ -35,13 +35,13 @@ Media Bus codes for RGB variant :
 Supported Controls
 ==================
 
-The driver exposes and supports 25 V4L2 Controls :
+The driver exposes and supports 20 V4L2 Controls :
 
-- 13 standard controls belonging to existing V4L2 control classes
-- 12 vd56g3-specific controls, defined for custom features of the sensor
+- 14 standard controls belonging to existing V4L2 control classes
+- 6 vd56g3-specific controls, defined for custom features of the sensor
 
 ================================= ========================================================================================
- **Standard V4L2 Controls**        **Description [V4L2 Control Class]**
+ **Standard V4L2 Controls**        **Description [Related V4L2 Control Class]**
 ================================= ========================================================================================
  ``V4L2_CID_PIXEL_RATE``           Pixel Rate [`Image Process control class`_]
  ``V4L2_CID_LINK_FREQ``            Link Frequency [`Image Process control class`_]
@@ -56,31 +56,26 @@ The driver exposes and supports 25 V4L2 Controls :
  ``V4L2_CID_ANALOGUE_GAIN``        Analogue Gain (only available in Manual exposure mode) [`Image Source control class`_]
  ``V4L2_CID_DIGITAL_GAIN``         Digital Gain (only available in Manual exposure mode) [`Image Process control class`_]
  ``V4L2_CID_EXPOSURE``             Exposure (only available in Manual exposure mode) [`User control class`_]
+ ``V4L2_CID_FLASH_LED_MODE``       Enable/Disable LED (when 'st,leds' property defined in DT)  [`Flash control class`_]
 ================================= ========================================================================================
 
 
 =================================== =====================================
  **VD56G3 Custom V4L2 Controls**     **Description**
 =================================== =====================================
- ``V4L2_CID_GPIO0_MODE``             `GPIO0 mode selection Control`_
- ``V4L2_CID_GPIO1_MODE``             `GPIO1 mode selection Control`_
- ``V4L2_CID_GPIO2_MODE``             `GPIO2 mode selection Control`_
- ``V4L2_CID_GPIO3_MODE``             `GPIO3 mode selection Control`_
- ``V4L2_CID_GPIO4_MODE``             `GPIO4 mode selection Control`_
- ``V4L2_CID_GPIO5_MODE``             `GPIO5 mode selection Control`_
- ``V4L2_CID_GPIO6_MODE``             `GPIO6 mode selection Control`_
- ``V4L2_CID_GPIO7_MODE``             `GPIO7 mode selection Control`_
  ``V4L2_CID_TEMPERATURE``            `Temperature Control`_
  ``V4L2_CID_AE_TARGET_PERCENTAGE``   `AE - Light level target (%)`_
  ``V4L2_CID_AE_STEP_PROPORTION``     `AE - Convergence step proportion`_
  ``V4L2_CID_AE_LEAK_PROPORTION``     `AE - Convergence leak proportion`_
+ ``V4L2_CID_DARKCAL_PEDESTAL``       `Dark Calibration Pedestal`_
+ ``V4L2_CID_SLAVE_MODE``             `VT Slave Mode Control`_
 =================================== =====================================
 
 .. _User control class: https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/control.html
 .. _Camera control class: https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/ext-ctrls-camera.html
 .. _Image Source control class: https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/ext-ctrls-image-source.html
 .. _Image Process control class: https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/ext-ctrls-image-process.html
-
+.. _Flash control class: https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/ext-ctrls-flash.html
 
 Custom Controls IDs
 -------------------
@@ -94,32 +89,14 @@ In order to be able to programmatically interact with these VD56G3-custom contro
 Custom Controls Definitions
 ---------------------------
 .. kernel-doc:: ./../src/st-vd56g3.c
-    :doc: GPIO0 mode selection Control
-.. kernel-doc:: ./../src/st-vd56g3.c
-    :doc: GPIO1 mode selection Control
-.. kernel-doc:: ./../src/st-vd56g3.c
-    :doc: GPIO2 mode selection Control
-.. kernel-doc:: ./../src/st-vd56g3.c
-    :doc: GPIO3 mode selection Control
-.. kernel-doc:: ./../src/st-vd56g3.c
-    :doc: GPIO4 mode selection Control
-.. kernel-doc:: ./../src/st-vd56g3.c
-    :doc: GPIO5 mode selection Control
-.. kernel-doc:: ./../src/st-vd56g3.c
-    :doc: GPIO6 mode selection Control
-.. kernel-doc:: ./../src/st-vd56g3.c
-    :doc: GPIO7 mode selection Control
-.. kernel-doc:: ./../src/st-vd56g3.c
     :doc: Temperature Control
 .. kernel-doc:: ./../src/st-vd56g3.c
     :doc: AE - Light level target (%)
-.. kernel-doc:: ./../src/st-vd56g3.c
-    :doc: AE - Control Mode
-.. kernel-doc:: ./../src/st-vd56g3.c
-    :doc: AE - Flicker Frequency
 .. kernel-doc:: ./../src/st-vd56g3.c
     :doc: AE - Convergence step proportion
 .. kernel-doc:: ./../src/st-vd56g3.c
     :doc: AE - Convergence leak proportion
 .. kernel-doc:: ./../src/st-vd56g3.c
-    :doc: AE - Exposure compensation
+    :doc: Dark Calibration Pedestal
+.. kernel-doc:: ./../src/st-vd56g3.c
+    :doc: VT Slave Mode Control
