@@ -4,7 +4,7 @@ System Overview
 
 The **Linux VD56G3 driver** (st-vd56g3.c) is based on the `Video4Linux2 framework`_ akka V4L2 framework. V4L2 is the official Linux Kernel API to handle video devices including capture devices like camera sensors.
 
-The `V4L2 framework`_ defines the API the Linux VD56G3 driver supports in order to be V4L2 compliant. The Linux kernel uses the camera driver to initialize the hardware and produce video frames. 
+The `V4L2 framework`_ defines APIs that the VD56G3 driver must supports in order to be V4L2 compliant. The Linux kernel uses the camera driver to initialize the hardware and produce video frames.
 
 Generally camera driver interacts with camera sensor over a low frequency configuration interface (I2C or SPI). The camera sensor streams output data over a dedicated high speed data serial interface.
 

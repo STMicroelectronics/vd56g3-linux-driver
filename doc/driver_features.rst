@@ -2,40 +2,86 @@
 Driver Features
 ===============
 
-The VD56G3 is an I²C `V4L2 sub-device driver`_. All VD56G3 features are exposed through two V4L2 mechanisms: 
+The VD56G3 linux driver support both :
 
-#. **V4L2 Operations**. The V4L2 Framework supports a wide variety of devices. Each V4L2 sub-device driver must declare the common operations actually supported by the device. These operations are related to the type of device: for example, camera-type devices generally implement all the same operations. See `V4L2 Supported Operations`_ section for the list of operations implemented in the VD56G3 driver.
-
-#. **V4L2 Controls**. Controls are particular objects that describes/handles a control properties. In addition to `V4L2 standard controls`_, customs controls can be created for sensor's specific features. See `V4L2 Supported Controls`_ for the list of controls supported by the driver (standards and customs ones).
-
-.. _V4L2 sub-device driver: https://www.kernel.org/doc/html/latest/driver-api/media/v4l2-subdev.html
-.. _V4L2 framework: https://www.kernel.org/doc/html/latest/driver-api/media/v4l2-core.html
-.. _V4L2 standard controls: https://www.kernel.org/doc/html/latest/driver-api/media/v4l2-controls.html
+    - VD56G3 - Monochrome version
+    - VD66GY - RGB Bayer version
 
 
-VD56G3 Supported Modes
-======================
+Supported Modes
+===============
 .. kernel-doc:: ./../src/st-vd56g3.c
     :doc: Supported Modes
     :no-header:
 
-V4L2 Supported Operations
-=========================
-.. kernel-doc:: ./../src/st-vd56g3.c
-    :doc: V4L2 supported Operations
-    :no-header:
-    :functions: vd56g3_s_stream, vd56g3_g_frame_interval, vd56g3_s_frame_interval, vd56g3_enum_mbus_code, vd56g3_get_fmt, vd56g3_set_fmt, vd56g3_enum_frame_size, vd56g3_enum_frame_interval
 
-.. _vd56g3_supported_crtls:
+Supported Output
+================
 
-V4L2 Supported Controls
-=======================
-.. kernel-doc:: ./../src/st-vd56g3.c
-    :doc: V4L2 supported Controls
-    :no-header:
+The driver supports 8bits and 10bits outputs in both Monochrome and RGB variants.
+
+Media Bus codes for Mono variant :
+
+- `MEDIA_BUS_FMT_Y8_1X8 <https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/subdev-formats.html?highlight=media_bus_fmt_y8_1x8#packed-yuv-formats>`_
+- `MEDIA_BUS_FMT_Y10_1X10 <https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/subdev-formats.html?highlight=media_bus_fmt_y10_1x10#packed-yuv-formats>`_
+
+Media Bus codes for RGB variant :
+
+- `MEDIA_BUS_FMT_SGRBG8_1X8 <https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/subdev-formats.html?highlight=media_bus_fmt_sgrbg8_1x8#bayer-formats>`_
+- `MEDIA_BUS_FMT_SGRBG10_1X10 <https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/subdev-formats.html?highlight=media_bus_fmt_sgrbg10_1x10#bayer-formats>`_
+- Or equivalent bayer format depending of the H/V flip variations (RGGB, BGGR, GBRG)
+
+
+Supported Controls
+==================
+
+The driver exposes and supports 20 V4L2 Controls :
+
+- 14 standard controls belonging to existing V4L2 control classes
+- 6 vd56g3-specific controls, defined for custom features of the sensor
+
+================================= ========================================================================================
+ **Standard V4L2 Controls**        **Description [Related V4L2 Control Class]**
+================================= ========================================================================================
+ ``V4L2_CID_PIXEL_RATE``           Pixel Rate [`Image Process control class`_]
+ ``V4L2_CID_LINK_FREQ``            Link Frequency [`Image Process control class`_]
+ ``V4L2_CID_HBLANK``               Horizontal Blanking [`Image Source control class`_]
+ ``V4L2_CID_VBLANK``               Vertical Blanking [`Image Source control class`_]
+ ``V4L2_CID_VFLIP``                Vertical Flip [`User control class`_]
+ ``V4L2_CID_HFLIP``                Horizontal Flip [`User control class`_]
+ ``V4L2_CID_TEST_PATTERN``         Test Pattern [`Image Process control class`_]
+ ``V4L2_CID_EXPOSURE_AUTO``        Auto Exposure [`Camera control class`_]
+ ``V4L2_CID_3A_LOCK``              Lock/Unlock Auto Exposure settings [`Camera control class`_]
+ ``V4L2_CID_AUTO_EXPOSURE_BIAS``   Auto Exposure Compensation [`Camera control class`_]
+ ``V4L2_CID_ANALOGUE_GAIN``        Analogue Gain (only available in Manual exposure mode) [`Image Source control class`_]
+ ``V4L2_CID_DIGITAL_GAIN``         Digital Gain (only available in Manual exposure mode) [`Image Process control class`_]
+ ``V4L2_CID_EXPOSURE``             Exposure (only available in Manual exposure mode) [`User control class`_]
+ ``V4L2_CID_FLASH_LED_MODE``       Enable/Disable LED (when 'st,leds' property defined in DT)  [`Flash control class`_]
+================================= ========================================================================================
+
+
+=================================== =====================================
+ **VD56G3 Custom V4L2 Controls**     **Description**
+=================================== =====================================
+ ``V4L2_CID_TEMPERATURE``            `Temperature Control`_
+ ``V4L2_CID_AE_TARGET_PERCENTAGE``   `AE - Light level target (%)`_
+ ``V4L2_CID_AE_STEP_PROPORTION``     `AE - Convergence step proportion`_
+ ``V4L2_CID_AE_LEAK_PROPORTION``     `AE - Convergence leak proportion`_
+ ``V4L2_CID_DARKCAL_PEDESTAL``       `Dark Calibration Pedestal`_
+ ``V4L2_CID_SLAVE_MODE``             `VT Slave Mode Control`_
+=================================== =====================================
+
+.. _User control class: https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/control.html
+.. _Camera control class: https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/ext-ctrls-camera.html
+.. _Image Source control class: https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/ext-ctrls-image-source.html
+.. _Image Process control class: https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/ext-ctrls-image-process.html
+.. _Flash control class: https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/ext-ctrls-flash.html
 
 Custom Controls IDs
 -------------------
+
+In order to be able to programmatically interact with these VD56G3-custom controls, their IDs definition are reproduced below.
+
 .. kernel-doc::  ./../src/st-vd56g3.c
    :snippets:  Custom-CIDs
    :language:  c
@@ -43,32 +89,14 @@ Custom Controls IDs
 Custom Controls Definitions
 ---------------------------
 .. kernel-doc:: ./../src/st-vd56g3.c
-    :doc: GPIO0 mode selection Control
-.. kernel-doc:: ./../src/st-vd56g3.c
-    :doc: GPIO1 mode selection Control
-.. kernel-doc:: ./../src/st-vd56g3.c
-    :doc: GPIO2 mode selection Control
-.. kernel-doc:: ./../src/st-vd56g3.c
-    :doc: GPIO3 mode selection Control
-.. kernel-doc:: ./../src/st-vd56g3.c
-    :doc: GPIO4 mode selection Control
-.. kernel-doc:: ./../src/st-vd56g3.c
-    :doc: GPIO5 mode selection Control
-.. kernel-doc:: ./../src/st-vd56g3.c
-    :doc: GPIO6 mode selection Control
-.. kernel-doc:: ./../src/st-vd56g3.c
-    :doc: GPIO7 mode selection Control
-.. kernel-doc:: ./../src/st-vd56g3.c
     :doc: Temperature Control
 .. kernel-doc:: ./../src/st-vd56g3.c
     :doc: AE - Light level target (%)
 .. kernel-doc:: ./../src/st-vd56g3.c
-    :doc: AE - Control Mode
+    :doc: AE - Convergence step proportion
 .. kernel-doc:: ./../src/st-vd56g3.c
-    :doc: AE - Flicker Frequency
+    :doc: AE - Convergence leak proportion
 .. kernel-doc:: ./../src/st-vd56g3.c
-    :doc: AE - Convergence step proportion (%)
+    :doc: Dark Calibration Pedestal
 .. kernel-doc:: ./../src/st-vd56g3.c
-    :doc: AE - Convergence leak proportion (per mil)
-.. kernel-doc:: ./../src/st-vd56g3.c
-    :doc: AE - Exposure compensation
+    :doc: VT Slave Mode Control
