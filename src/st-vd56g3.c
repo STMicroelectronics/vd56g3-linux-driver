@@ -24,21 +24,21 @@
 
 /* Backward compatibility */
 #include <linux/version.h>
-#if KERNEL_VERSION(5, 18, 0) >= LINUX_VERSION_CODE
+#if KERNEL_VERSION(5, 18, 0) > LINUX_VERSION_CODE
 #define MIPI_CSI2_DT_RAW8	0x2a
 #define MIPI_CSI2_DT_RAW10	0x2b
 #else
 #include <media/mipi-csi2.h>
 #endif
 
-#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+#if KERNEL_VERSION(5, 15, 0) > LINUX_VERSION_CODE
 #define HZ_PER_MHZ		1000000UL
 #define MEGA			1000000UL
 #else
 #include <linux/units.h>
 #endif
 
-#if KERNEL_VERSION(5, 9, 0) >= LINUX_VERSION_CODE
+#if KERNEL_VERSION(5, 9, 0) > LINUX_VERSION_CODE
 int dev_err_probe(const struct device *dev, int err, const char *fmt, ...)
 {
 	struct va_format vaf;
@@ -545,7 +545,7 @@ static int vd56g3_poll_reg(struct vd56g3 *sensor, u32 reg, u8 poll_val)
 	const unsigned int loop_delay_ms = 10;
 	const unsigned int timeout_ms = 500;
 	int ret;
-#if KERNEL_VERSION(5, 7, 0) >= LINUX_VERSION_CODE
+#if KERNEL_VERSION(5, 7, 0) > LINUX_VERSION_CODE
 	int loop_nb = timeout_ms / loop_delay_ms;
 
 	while (--loop_nb) {
@@ -872,7 +872,7 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	case V4L2_CID_EXPOSURE_AUTO:
 		is_auto = (ctrl->val == V4L2_EXPOSURE_AUTO);
-#if KERNEL_VERSION(4, 20, 0) >= LINUX_VERSION_CODE
+#if KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE
 		mutex_unlock(&sensor->lock);
 		v4l2_ctrl_grab(sensor->ae_lock_ctrl, !is_auto);
 		v4l2_ctrl_grab(sensor->ae_bias_ctrl, !is_auto);
@@ -1358,7 +1358,7 @@ static int vd56g3_s_stream(struct v4l2_subdev *sd, int enable)
 	mutex_lock(&sensor->lock);
 
 	if (enable) {
-#if KERNEL_VERSION(5, 5, 0) >= LINUX_VERSION_CODE
+#if KERNEL_VERSION(5, 10, 0) > LINUX_VERSION_CODE
 		ret = pm_runtime_get_sync(&client->dev);
 		if (ret < 0) {
 			pm_runtime_put_noidle(&client->dev);
@@ -1436,7 +1436,7 @@ endloops:
 }
 
 static int vd56g3_enum_mbus_code(struct v4l2_subdev *sd,
-#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 				 struct v4l2_subdev_pad_config *cfg,
 #else
 				 struct v4l2_subdev_state *sd_state,
@@ -1455,7 +1455,7 @@ static int vd56g3_enum_mbus_code(struct v4l2_subdev *sd,
 }
 
 static int vd56g3_enum_frame_size(struct v4l2_subdev *sd,
-#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 				  struct v4l2_subdev_pad_config *cfg,
 #else
 				  struct v4l2_subdev_state *sd_state,
@@ -1495,7 +1495,7 @@ static void vd56g3_update_pad_format(struct vd56g3 *sensor,
 }
 
 static int vd56g3_get_fmt(struct v4l2_subdev *sd,
-#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 			  struct v4l2_subdev_pad_config *cfg,
 #else
 			  struct v4l2_subdev_state *sd_state,
@@ -1509,11 +1509,14 @@ static int vd56g3_get_fmt(struct v4l2_subdev *sd,
 	mutex_lock(&sensor->lock);
 
 	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
-#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 		pad_fmt = v4l2_subdev_get_try_format(&sensor->sd, cfg,
 						     sd_fmt->pad);
-#else
+#elif KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE
 		pad_fmt = v4l2_subdev_get_try_format(&sensor->sd, sd_state,
+						     sd_fmt->pad);
+#else
+		pad_fmt = v4l2_subdev_get_pad_format(&sensor->sd, sd_state,
 						     sd_fmt->pad);
 #endif
 		pad_fmt->code = vd56g3_get_mbus_code(sensor, pad_fmt->code);
@@ -1551,7 +1554,7 @@ vd56g3_find_nearest_size(struct v4l2_mbus_framefmt *fmt)
 }
 
 static int vd56g3_set_fmt(struct v4l2_subdev *sd,
-#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 			  struct v4l2_subdev_pad_config *cfg,
 #else
 			  struct v4l2_subdev_state *sd_state,
@@ -1581,10 +1584,12 @@ static int vd56g3_set_fmt(struct v4l2_subdev *sd,
 				 &sd_fmt->format);
 
 	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
-#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 		pad_fmt = v4l2_subdev_get_try_format(sd, cfg, sd_fmt->pad);
-#else
+#elif KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE
 		pad_fmt = v4l2_subdev_get_try_format(sd, sd_state, sd_fmt->pad);
+#else
+		pad_fmt = v4l2_subdev_get_pad_format(sd, sd_state, sd_fmt->pad);
 #endif
 		*pad_fmt = sd_fmt->format;
 	} else if (sensor->current_mode != new_mode ||
@@ -1604,7 +1609,7 @@ out:
 }
 
 static int vd56g3_get_selection(struct v4l2_subdev *sd,
-#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 				struct v4l2_subdev_pad_config *cfg,
 #else
 				struct v4l2_subdev_state *sd_state,
@@ -1633,7 +1638,7 @@ static int vd56g3_get_selection(struct v4l2_subdev *sd,
 }
 
 static int vd56g3_init_cfg(struct v4l2_subdev *sd,
-#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 			   struct v4l2_subdev_pad_config *cfg)
 #else
 			   struct v4l2_subdev_state *sd_state)
@@ -1642,10 +1647,12 @@ static int vd56g3_init_cfg(struct v4l2_subdev *sd,
 	struct vd56g3 *sensor = to_vd56g3(sd);
 	struct v4l2_mbus_framefmt *pad_fmt;
 
-#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 	pad_fmt = v4l2_subdev_get_try_format(sd, cfg, 0);
-#else
+#elif KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE
 	pad_fmt = v4l2_subdev_get_try_format(sd, sd_state, 0);
+#else
+	pad_fmt = v4l2_subdev_get_pad_format(sd, sd_state, 0);
 #endif
 
 	/* Default to native resolution mode / raw8 */
@@ -1926,28 +1933,26 @@ static int vd56g3_check_csi_conf(struct vd56g3 *sensor,
 				 struct fwnode_handle *endpoint)
 {
 	struct i2c_client *client = sensor->i2c_client;
-	struct v4l2_fwnode_endpoint *ep;
+	struct v4l2_fwnode_endpoint ep = { .bus_type = V4L2_MBUS_CSI2_DPHY };
 	u32 phy_data_lanes[VD56G3_MAX_CSI_DATA_LANES] = { ~0, ~0 };
 	int n_lanes;
 	int p, l;
 	int ret = 0;
 
-#if KERNEL_VERSION(4, 20, 0) >= LINUX_VERSION_CODE
-	ep = v4l2_fwnode_endpoint_alloc_parse(endpoint);
-	if (IS_ERR(ep))
+#if KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE
+	struct v4l2_fwnode_endpoint *ep_ptr =
+		v4l2_fwnode_endpoint_alloc_parse(endpoint);
+	if (IS_ERR(ep_ptr))
 		return -EINVAL;
+	ep = (*ep_ptr);
 #else
-	struct v4l2_fwnode_endpoint ep_node = { .bus_type =
-							V4L2_MBUS_CSI2_DPHY };
-
-	ep = &ep_node;
-	ret = v4l2_fwnode_endpoint_alloc_parse(endpoint, ep);
+	ret = v4l2_fwnode_endpoint_alloc_parse(endpoint, &ep);
 	if (ret)
 		return -EINVAL;
 #endif
 
 	// Check lanes number
-	n_lanes = ep->bus.mipi_csi2.num_data_lanes;
+	n_lanes = ep.bus.mipi_csi2.num_data_lanes;
 	if (n_lanes != 1 && n_lanes != 2) {
 		dev_err(&client->dev, "Invalid data lane number %d\n", n_lanes);
 		ret = -EINVAL;
@@ -1956,7 +1961,7 @@ static int vd56g3_check_csi_conf(struct vd56g3 *sensor,
 	sensor->nb_of_lane = n_lanes;
 
 	// Clock lane must be first
-	if (ep->bus.mipi_csi2.clock_lane != 0) {
+	if (ep.bus.mipi_csi2.clock_lane != 0) {
 		dev_err(&client->dev, "Clk lane must be mapped to lane 0\n");
 		ret = -EINVAL;
 		goto done;
@@ -1965,7 +1970,7 @@ static int vd56g3_check_csi_conf(struct vd56g3 *sensor,
 	// Prepare Output Interface conf based on lane settings
 	// logical to physical lane conversion (+ pad remaining slots)
 	for (l = 0; l < n_lanes; l++)
-		phy_data_lanes[ep->bus.mipi_csi2.data_lanes[l] - 1] = l;
+		phy_data_lanes[ep.bus.mipi_csi2.data_lanes[l] - 1] = l;
 	for (p = 0; p < VD56G3_MAX_CSI_DATA_LANES; p++) {
 		if (phy_data_lanes[p] != ~0)
 			continue;
@@ -1973,30 +1978,35 @@ static int vd56g3_check_csi_conf(struct vd56g3 *sensor,
 		l++;
 	}
 	sensor->oif_ctrl = n_lanes |
-			   (ep->bus.mipi_csi2.lane_polarities[0] << 3) |
+			   (ep.bus.mipi_csi2.lane_polarities[0] << 3) |
 			   ((phy_data_lanes[0]) << 4) |
-			   (ep->bus.mipi_csi2.lane_polarities[1] << 6) |
+			   (ep.bus.mipi_csi2.lane_polarities[1] << 6) |
 			   ((phy_data_lanes[1]) << 7) |
-			   (ep->bus.mipi_csi2.lane_polarities[2] << 9);
+			   (ep.bus.mipi_csi2.lane_polarities[2] << 9);
 
 	// Check link frequency
-	if (!ep->nr_of_link_frequencies) {
+	if (!ep.nr_of_link_frequencies) {
 		dev_err(&client->dev, "link-frequency not found in DT\n");
 		ret = -EINVAL;
 		goto done;
 	}
-	if (ep->nr_of_link_frequencies != 1 ||
-	    (ep->link_frequencies[0] != ((n_lanes == 2) ?
-						 VD56G3_LINK_FREQ_DEF_2LANES :
-						 VD56G3_LINK_FREQ_DEF_1LANE))) {
+	if (ep.nr_of_link_frequencies != 1 ||
+	    (ep.link_frequencies[0] != ((n_lanes == 2) ?
+						VD56G3_LINK_FREQ_DEF_2LANES :
+						VD56G3_LINK_FREQ_DEF_1LANE))) {
 		dev_err(&client->dev, "Link frequency not supported: %lld\n",
-			ep->link_frequencies[0]);
+			ep.link_frequencies[0]);
 		ret = -EINVAL;
 		goto done;
 	}
 
 done:
-	v4l2_fwnode_endpoint_free(ep);
+#if KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE
+	v4l2_fwnode_endpoint_free(ep_ptr);
+#else
+	v4l2_fwnode_endpoint_free(&ep);
+#endif
+
 	return ret;
 }
 
@@ -2102,7 +2112,7 @@ static int vd56g3_parse_dt(struct vd56g3 *sensor)
 	struct fwnode_handle *endpoint;
 	int ret;
 
-#if KERNEL_VERSION(5, 2, 0) >= LINUX_VERSION_CODE
+#if KERNEL_VERSION(5, 2, 0) > LINUX_VERSION_CODE
 	endpoint = fwnode_graph_get_next_endpoint(
 		of_fwnode_handle(dev->of_node), NULL);
 #else
@@ -2353,7 +2363,11 @@ err_power_off:
 	return ret;
 }
 
+#if KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE
 static int vd56g3_remove(struct i2c_client *client)
+#else
+static void vd56g3_remove(struct i2c_client *client)
+#endif
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct vd56g3 *sensor = to_vd56g3(sd);
@@ -2364,8 +2378,9 @@ static int vd56g3_remove(struct i2c_client *client)
 	if (!pm_runtime_status_suspended(&client->dev))
 		vd56g3_power_off(sensor);
 	pm_runtime_set_suspended(&client->dev);
-
+#if KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE
 	return 0;
+#endif
 }
 
 static const struct of_device_id vd56g3_dt_ids[] = {
