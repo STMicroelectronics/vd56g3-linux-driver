@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.10.0] - 2023-05-29
+- Add support of kernel 6.1
+- Backward compatibility with all LTS kernels (down to k4.14)
+
 ## [0.9.0] - 2023-04-27
 - Support of variable framerate (instead of discrete)
 - Drop Cut1 support
