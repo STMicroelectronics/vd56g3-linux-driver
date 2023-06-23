@@ -59,6 +59,21 @@ int dev_err_probe(const struct device *dev, int err, const char *fmt, ...)
 }
 #endif
 
+#if KERNEL_VERSION(4, 5, 0) > LINUX_VERSION_CODE
+int pm_runtime_get_if_in_use(struct device *dev)
+{
+	unsigned long flags;
+	int retval;
+
+	spin_lock_irqsave(&dev->power.lock, flags);
+	retval = dev->power.disable_depth > 0 ? -EINVAL :
+		dev->power.runtime_status == RPM_ACTIVE
+			&& atomic_inc_not_zero(&dev->power.usage_count);
+	spin_unlock_irqrestore(&dev->power.lock, flags);
+	return retval;
+}
+#endif
+
 #define VD56G3_REG_SIZE_SHIFT		16
 #define VD56G3_REG_ADDR_MASK		0xffff
 #define VD56G3_REG_8BIT(n)		((1 << VD56G3_REG_SIZE_SHIFT) | (n))
@@ -176,6 +191,9 @@ int dev_err_probe(const struct device *dev, int err, const char *fmt, ...)
 #define V4L2_CID_AE_LEAK_PROPORTION		(V4L2_CID_USER_BASE | 0x1023)
 #define V4L2_CID_DARKCAL_PEDESTAL		(V4L2_CID_USER_BASE | 0x1024)
 #define V4L2_CID_SLAVE_MODE			(V4L2_CID_USER_BASE | 0x1025)
+#if KERNEL_VERSION(4, 13, 0) > LINUX_VERSION_CODE
+#define V4L2_CID_DIGITAL_GAIN			(V4L2_CID_USER_BASE | 0x1026)
+#endif
 /* parse-SNAP: */
 
 #include "st-vd56g3_patch_cut2.c"
@@ -1119,6 +1137,30 @@ static const struct v4l2_ctrl_config vd56g3_slave_ctrl = {
 	.def		= 1,
 };
 
+#if KERNEL_VERSION(4, 13, 0) > LINUX_VERSION_CODE
+/**
+ * DOC: Digital Gain Control
+ *
+ * Digital gain [1.00, 8.00] is coded as a Fixed Point 5.8
+ *
+ * :id:     ``V4L2_CID_DIGITAL_GAIN``
+ * :type:   ``V4L2_CTRL_TYPE_INTEGER``
+ * :min:    0x100
+ * :max:    0x800
+ * :def:    0x100
+ */
+static const struct v4l2_ctrl_config vd56g3_dgain_ctrl = {
+	.ops		= &vd56g3_ctrl_ops,
+	.id		= V4L2_CID_DIGITAL_GAIN,
+	.name		= "Digital Gain",
+	.type		= V4L2_CTRL_TYPE_INTEGER,
+	.min		= 0x100,
+	.max		= 0x800,
+	.step		= 1,
+	.def		= 0x100,
+};
+#endif
+
 static void vd56g3_update_controls(struct vd56g3 *sensor)
 {
 	unsigned int hblank =
@@ -1157,12 +1199,18 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 	/* Horizontal & vertival Flips modify bayer code with RGB variant*/
 	sensor->hflip_ctrl =
 		v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HFLIP, 0, 1, 1, 0);
+#if KERNEL_VERSION(4, 12, 0) > LINUX_VERSION_CODE
+#else
 	if (sensor->hflip_ctrl)
 		sensor->hflip_ctrl->flags |= V4L2_CTRL_FLAG_MODIFY_LAYOUT;
+#endif
 	sensor->vflip_ctrl =
 		v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VFLIP, 0, 1, 1, 0);
+#if KERNEL_VERSION(4, 12, 0) > LINUX_VERSION_CODE
+#else
 	if (sensor->vflip_ctrl)
 		sensor->vflip_ctrl->flags |= V4L2_CTRL_FLAG_MODIFY_LAYOUT;
+#endif
 
 	sensor->patgen_ctrl = v4l2_ctrl_new_std_menu_items(
 		hdl, ops, V4L2_CID_TEST_PATTERN,
@@ -1204,8 +1252,13 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 	 */
 	sensor->again_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_ANALOGUE_GAIN,
 					       0, 28, 1, 0);
+#if KERNEL_VERSION(4, 13, 0) > LINUX_VERSION_CODE
+	sensor->dgain_ctrl =
+		v4l2_ctrl_new_custom(hdl, &vd56g3_dgain_ctrl, NULL);
+#else
 	sensor->dgain_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_DIGITAL_GAIN,
 					       0x100, 0x800, 1, 0x100);
+#endif
 
 	/*
 	 * Set the exposure, horizontal and vertical blanking ctrls
@@ -1303,7 +1356,13 @@ static int vd56g3_stream_on(struct vd56g3 *sensor)
 		return ret;
 
 	/* Apply settings from V4L2 ctrls */
+#if KERNEL_VERSION(4, 13, 0) > LINUX_VERSION_CODE
+	mutex_unlock(&sensor->lock);
+	ret = v4l2_ctrl_handler_setup(&sensor->ctrl_handler);
+	mutex_lock(&sensor->lock);
+#else
 	ret = __v4l2_ctrl_handler_setup(&sensor->ctrl_handler);
+#endif
 	if (ret)
 		return ret;
 
@@ -1637,6 +1696,8 @@ static int vd56g3_get_selection(struct v4l2_subdev *sd,
 	return 0;
 }
 
+#if KERNEL_VERSION(4, 7, 0) > LINUX_VERSION_CODE
+#else
 static int vd56g3_init_cfg(struct v4l2_subdev *sd,
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 			   struct v4l2_subdev_pad_config *cfg)
@@ -1660,11 +1721,15 @@ static int vd56g3_init_cfg(struct v4l2_subdev *sd,
 				 vd56g3_mbus_codes[0][0], pad_fmt);
 	return 0;
 }
+#endif
 
 static const struct v4l2_subdev_core_ops vd56g3_core_ops = {};
 
 static const struct v4l2_subdev_pad_ops vd56g3_pad_ops = {
+#if KERNEL_VERSION(4, 7, 0) > LINUX_VERSION_CODE
+#else
 	.init_cfg = vd56g3_init_cfg,
+#endif
 	.enum_mbus_code = vd56g3_enum_mbus_code,
 	.enum_frame_size = vd56g3_enum_frame_size,
 	.get_fmt = vd56g3_get_fmt,
@@ -1933,7 +1998,11 @@ static int vd56g3_check_csi_conf(struct vd56g3 *sensor,
 				 struct fwnode_handle *endpoint)
 {
 	struct i2c_client *client = sensor->i2c_client;
+#if KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE
+	struct v4l2_fwnode_endpoint ep = { .bus_type = V4L2_MBUS_CSI2 };
+#else
 	struct v4l2_fwnode_endpoint ep = { .bus_type = V4L2_MBUS_CSI2_DPHY };
+#endif
 	u32 phy_data_lanes[VD56G3_MAX_CSI_DATA_LANES] = { ~0, ~0 };
 	int n_lanes;
 	int p, l;
@@ -2236,10 +2305,16 @@ static int vd56g3_subdev_init(struct vd56g3 *sensor)
 	v4l2_i2c_subdev_init(&sensor->sd, client, &vd56g3_subdev_ops);
 	sensor->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	sensor->sd.entity.ops = &vd56g3_subdev_entity_ops;
+#if KERNEL_VERSION(4, 5, 0) > LINUX_VERSION_CODE
+	sensor->sd.entity.type = MEDIA_ENT_T_V4L2_SUBDEV_SENSOR;
+	sensor->pad.flags = MEDIA_PAD_FL_SOURCE;
+	ret = media_entity_init(&sensor->sd.entity, 1, &sensor->pad, 0);
+#else
 	sensor->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
-
 	sensor->pad.flags = MEDIA_PAD_FL_SOURCE;
 	ret = media_entity_pads_init(&sensor->sd.entity, 1, &sensor->pad);
+#endif
+
 	if (ret) {
 		dev_err(&client->dev, "Failed to init media entity : %d", ret);
 		return ret;
@@ -2268,7 +2343,12 @@ static void vd56g3_subdev_cleanup(struct vd56g3 *sensor)
 	v4l2_ctrl_handler_free(sensor->sd.ctrl_handler);
 }
 
+#if KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE
+static int vd56g3_probe(struct i2c_client *client,
+			const struct i2c_device_id *id)
+#else
 static int vd56g3_probe(struct i2c_client *client)
+#endif
 {
 	struct device *dev = &client->dev;
 	struct vd56g3 *sensor;
@@ -2395,7 +2475,13 @@ static struct i2c_driver vd56g3_i2c_driver = {
 		.of_match_table = vd56g3_dt_ids,
 		.pm = &vd56g3_pm_ops,
 	},
+#if KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE
+	.probe = vd56g3_probe,
+#elif KERNEL_VERSION(6, 3, 0) > LINUX_VERSION_CODE
 	.probe_new = vd56g3_probe,
+#else
+	.probe = vd56g3_probe,
+#endif
 	.remove = vd56g3_remove,
 };
 
