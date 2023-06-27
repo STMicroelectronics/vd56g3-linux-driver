@@ -338,21 +338,6 @@ static const struct vd56g3_mode vd56g3_supported_modes[] = {
 			.height = 480,
 		},
 	},
-	// TODO : temporarily disable 240x320 resolution :
-	// - in this resolution, capture is generally done with stride-line=256
-	//   which could result in rendering issue if not handled correctly
-	// - in RGB -> incorrect bayer pattern observed.
-	//{
-	//	.width = 240,
-	//	.height = 320,
-	//	.bin_mode = VG56G3_BIN_MODE_DIGITAL_X4,
-	//	.crop = {
-	//		.left = 82,
-	//		.top = 42,
-	//		.width = 960,
-	//		.height = 1280,
-	//	},
-	//},
 };
 
 /* Sensor support 8bits and 10bits output in both variants
