@@ -157,17 +157,44 @@ int pm_runtime_get_if_in_use(struct device *dev)
 #define VD56G3_GPIOX_VT_SLAVE_MODE			0x0a
 #define VD56G3_REG_READOUT_CTRL				VD56G3_REG_8BIT(0x047e)
 
-/* Default Resolution */
-#define VD56G3_MAX_WIDTH				1120
-#define VD56G3_MAX_HEIGHT				1364
+/*
+ * The VD56G3 pixel array is organized as follows:
+ *
+ * +--------------------------------+
+ * |                                | \
+ * |   +------------------------+   |  |
+ * |   |                        |   |  |
+ * |   |                        |   |  |
+ * |   |                        |   |  |
+ * |   |                        |   |  |
+ * |   |                        |   |  |
+ * |   |   Default resolution   |   |  | Native height (1364)
+ * |   |      1120 x 1360       |   |  |
+ * |   |                        |   |  |
+ * |   |                        |   |  |
+ * |   |                        |   |  |
+ * |   |                        |   |  |
+ * |   +------------------------+   |  |
+ * |                                | /
+ * +--------------------------------+
+ *   <----------------------------->
+ *                     \-------------------  Native width (1124)
+ *
+ * The native resolution is 1124x1364.
+ * The recommanded/default resolution is 1120x1360 (multiple of 16).
+ */
+#define VD56G3_NATIVE_WIDTH				1124
+#define VD56G3_NATIVE_HEIGHT				1364
+#define VD56G3_DEFAULT_WIDTH				1120
+#define VD56G3_DEFAULT_HEIGHT				1360
 
 /* PLL settings */
 #define VD56G3_TARGET_PLL				804000000UL
 #define VD56G3_VT_CLOCK_DIV				5
 
-/* Line length and Frame length (for 10bits ADC only) */
+/* Line length and Frame length (valid for 10bits ADC only) */
 #define VD56G3_LINE_LENGTH_MIN				1236				// 1236 for 10bits ADC (TODO: ensure 9bits is never used)
-#define VD56G3_FRAME_LENGTH_MIN				(VD56G3_MAX_HEIGHT + 69)	// Min Frame Length, Min Vblank, highest FPS
+#define VD56G3_FRAME_LENGTH_MIN				(VD56G3_NATIVE_HEIGHT+69)	// Min Frame Length, Min Vblank, highest FPS
 #define VD56G3_FRAME_LENGTH_DEF_60FPS			2168				// (1/60)/(line_length/pixel_clk) // TODO : check line_length and pixel_clk at runtime
 
 /* Exposure settings */
@@ -231,10 +258,11 @@ struct vd56g3_mode {
  *
  * The vd56g3 driver supports 8 modes described below :
  *
- * ======= ======== ============
- *  Width   Height   Binning
- * ======= ======== ============
- *   1120     1364   No Binning
+ * ======= ======== ============ ====================
+ *  Width   Height   Binning	  Comment
+ * ======= ======== ============ ====================
+ *   1124     1364   No Binning   Native resolution
+ *   1120     1360   No Binning   Default resolution
  *   1024     1280   No Binning
  *   1024      768   No Binning
  *    768     1024   No Binning
@@ -242,7 +270,7 @@ struct vd56g3_mode {
  *    640      480   No Binning
  *    480      640   Binning x2
  *    320      240   Binning x2
- * ======= ======== ============
+ * ======= ======== ============ ====================
  *
  * Each mode defaults to 60FPS. In addition, the framerate could be adjusted in
  * a continuous manner up to 88FPS (making use of the ``V4L2_CID_VBLANK``
@@ -251,14 +279,25 @@ struct vd56g3_mode {
 
 static const struct vd56g3_mode vd56g3_supported_modes[] = {
 	{
-		.width = VD56G3_MAX_WIDTH,
-		.height = VD56G3_MAX_HEIGHT,
+		.width = VD56G3_NATIVE_WIDTH,
+		.height = VD56G3_NATIVE_HEIGHT,
+		.bin_mode = VG56G3_BIN_MODE_NORMAL,
+		.crop = {
+			.left = 0,
+			.top = 0,
+			.width = VD56G3_NATIVE_WIDTH,
+			.height = VD56G3_NATIVE_HEIGHT,
+		},
+	},
+	{
+		.width = VD56G3_DEFAULT_WIDTH,
+		.height = VD56G3_DEFAULT_HEIGHT,
 		.bin_mode = VG56G3_BIN_MODE_NORMAL,
 		.crop = {
 			.left = 2,
-			.top = 0,
-			.width = VD56G3_MAX_WIDTH,
-			.height = VD56G3_MAX_HEIGHT,
+			.top = 2,
+			.width = VD56G3_DEFAULT_WIDTH,
+			.height = VD56G3_DEFAULT_HEIGHT,
 		},
 	},
 	{
@@ -1671,8 +1710,8 @@ static int vd56g3_get_selection(struct v4l2_subdev *sd,
 	case V4L2_SEL_TGT_CROP_BOUNDS:
 		sel->r.top = 0;
 		sel->r.left = 0;
-		sel->r.width = VD56G3_MAX_WIDTH;
-		sel->r.height = VD56G3_MAX_HEIGHT;
+		sel->r.width = VD56G3_NATIVE_WIDTH;
+		sel->r.height = VD56G3_NATIVE_HEIGHT;
 		break;
 	default:
 		return -EINVAL;
@@ -1701,8 +1740,8 @@ static int vd56g3_init_cfg(struct v4l2_subdev *sd,
 	pad_fmt = v4l2_subdev_get_pad_format(sd, sd_state, 0);
 #endif
 
-	/* Default to native resolution mode / raw8 */
-	vd56g3_update_pad_format(sensor, &vd56g3_supported_modes[0],
+	/* Default resolution mode / raw8 */
+	vd56g3_update_pad_format(sensor, &vd56g3_supported_modes[1],
 				 vd56g3_mbus_codes[0][0], pad_fmt);
 	return 0;
 }
@@ -2283,8 +2322,8 @@ static int vd56g3_subdev_init(struct vd56g3 *sensor)
 
 	mutex_init(&sensor->lock);
 	sensor->streaming = false;
-	/* Default to native resolution mode / raw8 */
-	sensor->current_mode = &vd56g3_supported_modes[0];
+	/* Default resolution mode / raw8 */
+	sensor->current_mode = &vd56g3_supported_modes[1];
 	sensor->mbus_code = vd56g3_mbus_codes[0][0];
 
 	v4l2_i2c_subdev_init(&sensor->sd, client, &vd56g3_subdev_ops);
