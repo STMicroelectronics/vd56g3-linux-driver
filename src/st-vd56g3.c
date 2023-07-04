@@ -405,6 +405,11 @@ static const unsigned int vd56g3_mbus_codes[2][5] = {
 	},
 };
 
+enum vd56g3_pad_types {
+	IMAGE_PAD,
+	NUM_PADS
+};
+
 enum vd56g3_expo_state {
 	VD56G3_EXPO_AUTO,
 	VD56G3_EXPO_AUTO_FREEZE,
@@ -414,7 +419,7 @@ enum vd56g3_expo_state {
 struct vd56g3 {
 	struct i2c_client *i2c_client;
 	struct v4l2_subdev sd;
-	struct media_pad pad;
+	struct media_pad pad[NUM_PADS];
 	struct regulator_bulk_data supplies[VD56G3_NUM_SUPPLIES];
 	struct gpio_desc *reset_gpio;
 	struct clk *xclk;
@@ -453,7 +458,7 @@ struct vd56g3 {
 	struct v4l2_ctrl *led_ctrl;
 	bool streaming;
 	const struct vd56g3_mode *current_mode;
-	u32 mbus_code;
+	u32 img_mbus_code;
 };
 
 static inline struct vd56g3 *to_vd56g3(struct v4l2_subdev *sd)
@@ -1355,11 +1360,11 @@ static int vd56g3_stream_on(struct vd56g3 *sensor)
 
 	/* configure output */
 	vd56g3_write(sensor, VD56G3_REG_FORMAT_CTRL,
-		     vd56g3_get_bpp(sensor->mbus_code), &ret);
+		     vd56g3_get_bpp(sensor->img_mbus_code), &ret);
 	vd56g3_write(sensor, VD56G3_REG_OIF_CTRL, sensor->oif_ctrl, &ret);
 	vd56g3_write(sensor, VD56G3_REG_OIF_CSI_BITRATE, csi_mbps, &ret);
 	vd56g3_write(sensor, VD56G3_REG_OIF_IMG_CTRL,
-		     vd56g3_get_datatype(sensor->mbus_code), &ret);
+		     vd56g3_get_datatype(sensor->img_mbus_code), &ret);
 
 	/* configure ROIs and bin mode */
 	vd56g3_write(sensor, VD56G3_REG_READOUT_CTRL,
@@ -1534,6 +1539,9 @@ static int vd56g3_enum_mbus_code(struct v4l2_subdev *sd,
 {
 	struct vd56g3 *sensor = to_vd56g3(sd);
 
+	if (code->pad >= NUM_PADS)
+		return -EINVAL;
+
 	if (code->index >= ARRAY_SIZE(vd56g3_mbus_codes))
 		return -EINVAL;
 
@@ -1551,11 +1559,7 @@ static int vd56g3_enum_frame_size(struct v4l2_subdev *sd,
 #endif
 				  struct v4l2_subdev_frame_size_enum *fse)
 {
-	struct vd56g3 *sensor = to_vd56g3(sd);
-	struct i2c_client *client = sensor->i2c_client;
-
-	dev_dbg(&client->dev, "%s for index %d", __func__, fse->index);
-	if (fse->pad != 0)
+	if (fse->pad >= NUM_PADS)
 		return -EINVAL;
 	if (fse->index >= ARRAY_SIZE(vd56g3_supported_modes))
 		return -EINVAL;
@@ -1568,10 +1572,10 @@ static int vd56g3_enum_frame_size(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static void vd56g3_update_pad_format(struct vd56g3 *sensor,
-				     const struct vd56g3_mode *mode,
-				     u32 mbus_code,
-				     struct v4l2_mbus_framefmt *mbus_fmt)
+static void vd56g3_update_img_pad_format(struct vd56g3 *sensor,
+					 const struct vd56g3_mode *mode,
+					 u32 mbus_code,
+					 struct v4l2_mbus_framefmt *mbus_fmt)
 {
 	mbus_fmt->width = mode->width;
 	mbus_fmt->height = mode->height;
@@ -1583,17 +1587,20 @@ static void vd56g3_update_pad_format(struct vd56g3 *sensor,
 	mbus_fmt->xfer_func = V4L2_XFER_FUNC_DEFAULT;
 }
 
-static int vd56g3_get_fmt(struct v4l2_subdev *sd,
+static int vd56g3_get_pad_fmt(struct v4l2_subdev *sd,
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
-			  struct v4l2_subdev_pad_config *cfg,
+			      struct v4l2_subdev_pad_config *cfg,
 #else
-			  struct v4l2_subdev_state *sd_state,
+			      struct v4l2_subdev_state *sd_state,
 #endif
-			  struct v4l2_subdev_format *sd_fmt)
+			      struct v4l2_subdev_format *sd_fmt)
 {
 	struct vd56g3 *sensor = to_vd56g3(sd);
 	struct i2c_client *client = sensor->i2c_client;
 	struct v4l2_mbus_framefmt *pad_fmt;
+
+	if (sd_fmt->pad >= NUM_PADS)
+		return -EINVAL;
 
 	mutex_lock(&sensor->lock);
 
@@ -1608,18 +1615,20 @@ static int vd56g3_get_fmt(struct v4l2_subdev *sd,
 		pad_fmt = v4l2_subdev_get_pad_format(&sensor->sd, sd_state,
 						     sd_fmt->pad);
 #endif
+		/* Image mbus code could change with H/V flips */
 		pad_fmt->code = vd56g3_get_mbus_code(sensor, pad_fmt->code);
 		sd_fmt->format = *pad_fmt;
 	} else {
-		vd56g3_update_pad_format(sensor, sensor->current_mode,
-					 sensor->mbus_code, &sd_fmt->format);
+		vd56g3_update_img_pad_format(sensor, sensor->current_mode,
+					     sensor->img_mbus_code,
+					     &sd_fmt->format);
 	}
 
 	mutex_unlock(&sensor->lock);
 
-	dev_dbg(&client->dev, "%s[%d] <- [pad%d]:%dx%d", __func__,
-		sd_fmt->which, sd_fmt->pad, sd_fmt->format.width,
-		sd_fmt->format.height);
+	dev_dbg(&client->dev, "%s[%d][%s] <- :%dx%d", __func__, sd_fmt->pad,
+		(sd_fmt->which == V4L2_SUBDEV_FORMAT_TRY) ? "try" : "active",
+		sd_fmt->format.width, sd_fmt->format.height);
 
 	return 0;
 }
@@ -1642,35 +1651,35 @@ vd56g3_find_nearest_size(struct v4l2_mbus_framefmt *fmt)
 	return mode;
 }
 
-static int vd56g3_set_fmt(struct v4l2_subdev *sd,
+static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
-			  struct v4l2_subdev_pad_config *cfg,
+			      struct v4l2_subdev_pad_config *cfg,
 #else
-			  struct v4l2_subdev_state *sd_state,
+			      struct v4l2_subdev_state *sd_state,
 #endif
-			  struct v4l2_subdev_format *sd_fmt)
+			      struct v4l2_subdev_format *sd_fmt)
 {
 	struct vd56g3 *sensor = to_vd56g3(sd);
 	struct i2c_client *client = sensor->i2c_client;
 	const struct vd56g3_mode *new_mode;
 	struct v4l2_mbus_framefmt *pad_fmt;
-	int ret = 0;
 
-	dev_dbg(&client->dev, "%s[%d] -> [pad%d]:%dx%d", __func__,
-		sd_fmt->which, sd_fmt->pad, sd_fmt->format.width,
-		sd_fmt->format.height);
+	dev_dbg(&client->dev, "%s[%d][%s] -> :%dx%d", __func__, sd_fmt->pad,
+		(sd_fmt->which == V4L2_SUBDEV_FORMAT_TRY) ? "try" : "active",
+		sd_fmt->format.width, sd_fmt->format.height);
+
+	if (sd_fmt->pad >= NUM_PADS)
+		return -EINVAL;
+
+	if (sensor->streaming)
+		return -EBUSY;
 
 	mutex_lock(&sensor->lock);
 
-	if (sensor->streaming) {
-		ret = -EBUSY;
-		goto out;
-	}
-
 	/* find best format */
 	new_mode = vd56g3_find_nearest_size(&sd_fmt->format);
-	vd56g3_update_pad_format(sensor, new_mode, sd_fmt->format.code,
-				 &sd_fmt->format);
+	vd56g3_update_img_pad_format(sensor, new_mode, sd_fmt->format.code,
+				     &sd_fmt->format);
 
 	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
@@ -1682,19 +1691,18 @@ static int vd56g3_set_fmt(struct v4l2_subdev *sd,
 #endif
 		*pad_fmt = sd_fmt->format;
 	} else if (sensor->current_mode != new_mode ||
-		   sensor->mbus_code != sd_fmt->format.code) {
+		   sensor->img_mbus_code != sd_fmt->format.code) {
 		// This nested 'if' only avoid to reset ctrls while format
 		// hasn't changed (userspace pb, we shouldn't interfere ?)
 		sensor->current_mode = new_mode;
-		sensor->mbus_code = sd_fmt->format.code;
+		sensor->img_mbus_code = sd_fmt->format.code;
 
 		vd56g3_update_controls(sensor);
 	}
 
-out:
 	mutex_unlock(&sensor->lock);
 
-	return ret;
+	return 0;
 }
 
 static int vd56g3_get_selection(struct v4l2_subdev *sd,
@@ -1736,19 +1744,20 @@ static int vd56g3_init_cfg(struct v4l2_subdev *sd,
 #endif
 {
 	struct vd56g3 *sensor = to_vd56g3(sd);
-	struct v4l2_mbus_framefmt *pad_fmt;
-
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
-	pad_fmt = v4l2_subdev_get_try_format(sd, cfg, 0);
+	struct v4l2_mbus_framefmt *img_pad_fmt =
+		v4l2_subdev_get_try_format(sd, cfg, IMAGE_PAD);
 #elif KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE
-	pad_fmt = v4l2_subdev_get_try_format(sd, sd_state, 0);
+	struct v4l2_mbus_framefmt *img_pad_fmt =
+		v4l2_subdev_get_try_format(sd, sd_state, IMAGE_PAD);
 #else
-	pad_fmt = v4l2_subdev_get_pad_format(sd, sd_state, 0);
+	struct v4l2_mbus_framefmt *img_pad_fmt =
+		v4l2_subdev_get_pad_format(sd, sd_state, IMAGE_PAD);
 #endif
 
 	/* Default resolution mode / raw8 */
-	vd56g3_update_pad_format(sensor, &vd56g3_supported_modes[1],
-				 vd56g3_mbus_codes[0][0], pad_fmt);
+	vd56g3_update_img_pad_format(sensor, &vd56g3_supported_modes[1],
+				     vd56g3_mbus_codes[0][0], img_pad_fmt);
 	return 0;
 }
 #endif
@@ -1762,8 +1771,8 @@ static const struct v4l2_subdev_pad_ops vd56g3_pad_ops = {
 #endif
 	.enum_mbus_code = vd56g3_enum_mbus_code,
 	.enum_frame_size = vd56g3_enum_frame_size,
-	.get_fmt = vd56g3_get_fmt,
-	.set_fmt = vd56g3_set_fmt,
+	.get_fmt = vd56g3_get_pad_fmt,
+	.set_fmt = vd56g3_set_pad_fmt,
 	.get_selection = vd56g3_get_selection,
 };
 
@@ -2332,19 +2341,20 @@ static int vd56g3_subdev_init(struct vd56g3 *sensor)
 	sensor->streaming = false;
 	/* Default resolution mode / raw8 */
 	sensor->current_mode = &vd56g3_supported_modes[1];
-	sensor->mbus_code = vd56g3_mbus_codes[0][0];
+	sensor->img_mbus_code = vd56g3_mbus_codes[0][0];
 
+	/* Init sub device */
 	v4l2_i2c_subdev_init(&sensor->sd, client, &vd56g3_subdev_ops);
 	sensor->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	sensor->sd.entity.ops = &vd56g3_subdev_entity_ops;
+	/* Init source pad */
+	sensor->pad[IMAGE_PAD].flags = MEDIA_PAD_FL_SOURCE;
 #if KERNEL_VERSION(4, 5, 0) > LINUX_VERSION_CODE
 	sensor->sd.entity.type = MEDIA_ENT_T_V4L2_SUBDEV_SENSOR;
-	sensor->pad.flags = MEDIA_PAD_FL_SOURCE;
-	ret = media_entity_init(&sensor->sd.entity, 1, &sensor->pad, 0);
+	ret = media_entity_init(&sensor->sd.entity, NUM_PADS, sensor->pad, 0);
 #else
 	sensor->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
-	sensor->pad.flags = MEDIA_PAD_FL_SOURCE;
-	ret = media_entity_pads_init(&sensor->sd.entity, 1, &sensor->pad);
+	ret = media_entity_pads_init(&sensor->sd.entity, NUM_PADS, sensor->pad);
 #endif
 
 	if (ret) {
