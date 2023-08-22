@@ -131,6 +131,10 @@ int pm_runtime_get_if_in_use(struct device *dev)
 #define VD56G3_REG_AE_COLDSTART_ANALOG_GAIN		VD56G3_REG_8BIT(0x042C)
 #define VD56G3_REG_AE_COLDSTART_DIGITAL_GAIN		VD56G3_REG_16BIT(0x042E)
 #define VD56G3_REG_AE_COMPILER_CONTROL			VD56G3_REG_8BIT(0x0430)
+#define VD56G3_REG_AE_ROI_START_H			VD56G3_REG_16BIT(0x0432)
+#define VD56G3_REG_AE_ROI_START_V			VD56G3_REG_16BIT(0x0434)
+#define VD56G3_REG_AE_ROI_END_H				VD56G3_REG_16BIT(0x0436)
+#define VD56G3_REG_AE_ROI_END_V				VD56G3_REG_16BIT(0x0438)
 #define VD56G3_REG_AE_COMPENSATION			VD56G3_REG_16BIT(0x043A)
 #define VD56G3_REG_AE_TARGET_PERCENTAGE			VD56G3_REG_16BIT(0x043C)
 #define VD56G3_REG_AE_STEP_PROPORTION			VD56G3_REG_16BIT(0x043E)
@@ -146,6 +150,8 @@ int pm_runtime_get_if_in_use(struct device *dev)
 #define VD56G3_REG_MANUAL_DIGITAL_GAIN_CH2		VD56G3_REG_16BIT(0x0454)
 #define VD56G3_REG_MANUAL_DIGITAL_GAIN_CH3		VD56G3_REG_16BIT(0x0456)
 #define VD56G3_REG_FRAME_LENGTH				VD56G3_REG_16BIT(0x0458)
+#define VD56G3_REG_Y_START				VD56G3_REG_16BIT(0x045a)
+#define VD56G3_REG_Y_END				VD56G3_REG_16BIT(0x045c)
 #define VD56G3_REG_OUT_ROI_X_START			VD56G3_REG_16BIT(0x045e)
 #define VD56G3_REG_OUT_ROI_X_END			VD56G3_REG_16BIT(0x0460)
 #define VD56G3_REG_OUT_ROI_Y_START			VD56G3_REG_16BIT(0x0462)
@@ -193,9 +199,9 @@ int pm_runtime_get_if_in_use(struct device *dev)
 #define VD56G3_VT_CLOCK_DIV				5
 
 /* Line length and Frame length (valid for 10bits ADC only) */
-#define VD56G3_LINE_LENGTH_MIN				1236				// 1236 for 10bits ADC (TODO: ensure 9bits is never used)
-#define VD56G3_FRAME_LENGTH_MIN				(VD56G3_NATIVE_HEIGHT+69)	// Min Frame Length, Min Vblank, highest FPS
-#define VD56G3_FRAME_LENGTH_DEF_60FPS			2168				// (1/60)/(line_length/pixel_clk) // TODO : check line_length and pixel_clk at runtime
+#define VD56G3_LINE_LENGTH_MIN				1236				// line length for normal (10bits) ADC mode
+#define VD56G3_FRAME_LENGTH_OFFSET			110				// This limits the framerate to 88.5FPS at full resolution
+#define VD56G3_FRAME_LENGTH_DEF_60FPS			2168				// (1/60)/(line_length/pixel_clock)
 
 /* Exposure settings */
 #define VD56G3_EXPOSURE_OFFSET				(68 + 7)			// EXP_COARSE_INTG_MARGIN + 7
@@ -1189,8 +1195,7 @@ static void vd56g3_update_controls(struct vd56g3 *sensor)
 {
 	unsigned int hblank =
 		VD56G3_LINE_LENGTH_MIN - sensor->current_mode->crop.width;
-	unsigned int vblank_min =
-		VD56G3_FRAME_LENGTH_MIN - sensor->current_mode->crop.height;
+	unsigned int vblank_min = VD56G3_FRAME_LENGTH_OFFSET;
 	unsigned int vblank = VD56G3_FRAME_LENGTH_DEF_60FPS -
 			      sensor->current_mode->crop.height;
 	unsigned int vblank_max = 0xffff - sensor->current_mode->crop.height;
@@ -1362,15 +1367,22 @@ static int vd56g3_stream_on(struct vd56g3 *sensor)
 	vd56g3_write(sensor, VD56G3_REG_OIF_IMG_CTRL,
 		     vd56g3_get_datatype(sensor->mbus_code), &ret);
 
-	/* configure size and bin mode */
+	/* configure ROIs and bin mode */
 	vd56g3_write(sensor, VD56G3_REG_READOUT_CTRL,
 		     sensor->current_mode->bin_mode, &ret);
+	vd56g3_write(sensor, VD56G3_REG_Y_START, crop->top, &ret);
+	vd56g3_write(sensor, VD56G3_REG_Y_END, crop->top + crop->height - 1,
+		     &ret);
 	vd56g3_write(sensor, VD56G3_REG_OUT_ROI_X_START, crop->left, &ret);
 	vd56g3_write(sensor, VD56G3_REG_OUT_ROI_X_END,
 		     crop->left + crop->width - 1, &ret);
-	vd56g3_write(sensor, VD56G3_REG_OUT_ROI_Y_START, crop->top, &ret);
-	vd56g3_write(sensor, VD56G3_REG_OUT_ROI_Y_END,
-		     crop->top + crop->height - 1, &ret);
+	vd56g3_write(sensor, VD56G3_REG_OUT_ROI_Y_START, 0, &ret);
+	vd56g3_write(sensor, VD56G3_REG_OUT_ROI_Y_END, crop->height - 1, &ret);
+	vd56g3_write(sensor, VD56G3_REG_AE_ROI_START_H, crop->left, &ret);
+	vd56g3_write(sensor, VD56G3_REG_AE_ROI_END_H,
+		     crop->left + crop->width - 1, &ret);
+	vd56g3_write(sensor, VD56G3_REG_AE_ROI_START_V, 0, &ret);
+	vd56g3_write(sensor, VD56G3_REG_AE_ROI_END_V, crop->height - 1, &ret);
 	if (ret)
 		return ret;
 
