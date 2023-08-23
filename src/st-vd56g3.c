@@ -1329,7 +1329,7 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 			v4l2_ctrl_new_std_menu(hdl, ops,
 					       V4L2_CID_FLASH_LED_MODE,
 					       V4L2_FLASH_LED_MODE_FLASH, 0,
-					       V4L2_FLASH_LED_MODE_FLASH);
+					       V4L2_FLASH_LED_MODE_NONE);
 
 	if (hdl->error) {
 		ret = hdl->error;
