@@ -67,8 +67,8 @@ int pm_runtime_get_if_in_use(struct device *dev)
 
 	spin_lock_irqsave(&dev->power.lock, flags);
 	retval = dev->power.disable_depth > 0 ? -EINVAL :
-		dev->power.runtime_status == RPM_ACTIVE
-			&& atomic_inc_not_zero(&dev->power.usage_count);
+		dev->power.runtime_status == RPM_ACTIVE &&
+			atomic_inc_not_zero(&dev->power.usage_count);
 	spin_unlock_irqrestore(&dev->power.lock, flags);
 	return retval;
 }
@@ -187,7 +187,7 @@ int pm_runtime_get_if_in_use(struct device *dev)
  *                     \-------------------  Native width (1124)
  *
  * The native resolution is 1124x1364.
- * The recommanded/default resolution is 1120x1360 (multiple of 16).
+ * The recommended/default resolution is 1120x1360 (multiple of 16).
  */
 #define VD56G3_NATIVE_WIDTH				1124
 #define VD56G3_NATIVE_HEIGHT				1364
@@ -199,12 +199,16 @@ int pm_runtime_get_if_in_use(struct device *dev)
 #define VD56G3_VT_CLOCK_DIV				5
 
 /* Line length and Frame length (valid for 10bits ADC only) */
-#define VD56G3_LINE_LENGTH_MIN				1236				// line length for normal (10bits) ADC mode
-#define VD56G3_FRAME_LENGTH_OFFSET			110				// This limits the framerate to 88.5FPS at full resolution
-#define VD56G3_FRAME_LENGTH_DEF_60FPS			2168				// (1/60)/(line_length/pixel_clock)
+/* line length for normal (10bits) ADC mode */
+#define VD56G3_LINE_LENGTH_MIN				1236
+/* This limits the framerate to 88.5FPS at full resolution */
+#define VD56G3_FRAME_LENGTH_OFFSET			110
+/* (1/60)/(line_length/pixel_clock) */
+#define VD56G3_FRAME_LENGTH_DEF_60FPS			2168
 
 /* Exposure settings */
-#define VD56G3_EXPOSURE_OFFSET				(68 + 7)			// EXP_COARSE_INTG_MARGIN + 7
+/* EXP_COARSE_INTG_MARGIN + 7 */
+#define VD56G3_EXPOSURE_OFFSET				(68 + 7)
 #define VD56G3_EXPOSURE_DEFAULT				1420
 
 /* Output Interface settings */
@@ -215,7 +219,8 @@ int pm_runtime_get_if_in_use(struct device *dev)
 /* GPIOs */
 #define VD56G3_NB_GPIOS					8
 
-#define VD56G3_WRITE_MULTIPLE_CHUNK_MAX			16				// TODO : unecessary
+/* TODO : unnecessary */
+#define VD56G3_WRITE_MULTIPLE_CHUNK_MAX			16
 
 /* parse-SNIP: Custom-CIDs*/
 #define V4L2_CID_TEMPERATURE			(V4L2_CID_USER_BASE | 0x1020)
@@ -240,7 +245,6 @@ static const char *const vd56g3_supply_names[] = {
 };
 
 #define VD56G3_NUM_SUPPLIES		ARRAY_SIZE(vd56g3_supply_names)
-
 
 /* -----------------------------------------------------------------------------
  * Modes and formats
@@ -849,11 +853,11 @@ static int vd56g3_write_gpiox(struct vd56g3 *sensor, unsigned long gpio_mask)
 	for_each_set_bit(io, &gpio_mask, VD56G3_NB_GPIOS) {
 		gpio_val = sensor->gpios[io];
 
-		if ((gpio_val == VD56G3_GPIOX_VT_SLAVE_MODE) &&
+		if (gpio_val == VD56G3_GPIOX_VT_SLAVE_MODE &&
 		    !sensor->slave_ctrl->val)
 			gpio_val = VD56G3_GPIOX_GPIO_IN;
 
-		if ((gpio_val == VD56G3_GPIOX_STROBE_MODE) &&
+		if (gpio_val == VD56G3_GPIOX_STROBE_MODE &&
 		    sensor->led_ctrl->val == V4L2_FLASH_LED_MODE_NONE)
 			gpio_val = VD56G3_GPIOX_GPIO_IN;
 
@@ -905,7 +909,7 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 	unsigned int frame_length;
 	unsigned int expo_max;
 	bool is_auto;
-	int ret;
+	int tmp, ret;
 
 	if (ctrl->flags & V4L2_CTRL_FLAG_READ_ONLY)
 		return 0;
@@ -961,12 +965,10 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 		ret = vd56g3_lock_exposure(sensor, ctrl->val);
 		break;
 	case V4L2_CID_AUTO_EXPOSURE_BIAS:
-		ret = vd56g3_write(
-			sensor, VD56G3_REG_AE_COMPENSATION,
-			DIV_ROUND_CLOSEST((int)vd56g3_ev_bias_qmenu[ctrl->val] *
-						  256,
-					  1000),
-			NULL);
+		tmp = DIV_ROUND_CLOSEST((int)vd56g3_ev_bias_qmenu[ctrl->val] *
+					256, 1000);
+		ret = vd56g3_write(sensor, VD56G3_REG_AE_COMPENSATION, tmp,
+				   NULL);
 		break;
 	case V4L2_CID_VBLANK:
 		ret = vd56g3_write(sensor, VD56G3_REG_FRAME_LENGTH,
@@ -1218,6 +1220,8 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 	const struct v4l2_ctrl_ops *ops = &vd56g3_ctrl_ops;
 	struct v4l2_ctrl_handler *hdl = &sensor->ctrl_handler;
 	struct v4l2_ctrl *ctrl;
+	unsigned int test_pattern_menu_size =
+		ARRAY_SIZE(vd56g3_test_pattern_menu) - 1;
 	int ret;
 
 	v4l2_ctrl_handler_init(hdl, 25);
@@ -1241,10 +1245,10 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 		sensor->vflip_ctrl->flags |= V4L2_CTRL_FLAG_MODIFY_LAYOUT;
 #endif
 
-	sensor->patgen_ctrl = v4l2_ctrl_new_std_menu_items(
-		hdl, ops, V4L2_CID_TEST_PATTERN,
-		ARRAY_SIZE(vd56g3_test_pattern_menu) - 1, 0, 0,
-		vd56g3_test_pattern_menu);
+	sensor->patgen_ctrl =
+		v4l2_ctrl_new_std_menu_items(hdl, ops, V4L2_CID_TEST_PATTERN,
+					     test_pattern_menu_size, 0, 0,
+					     vd56g3_test_pattern_menu);
 
 	ctrl = v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_LINK_FREQ,
 				      ARRAY_SIZE(vd56g3_link_freq_1lane) - 1, 0,
@@ -1268,11 +1272,12 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 	sensor->ae_lock_ctrl =
 		v4l2_ctrl_new_std(hdl, ops, V4L2_CID_3A_LOCK, 0, 7, 0, 0);
 
-	sensor->ae_bias_ctrl = v4l2_ctrl_new_int_menu(
-		hdl, ops, V4L2_CID_AUTO_EXPOSURE_BIAS,
-		ARRAY_SIZE(vd56g3_ev_bias_qmenu) - 1,
-		(ARRAY_SIZE(vd56g3_ev_bias_qmenu) + 1) / 2 - 1,
-		vd56g3_ev_bias_qmenu);
+	sensor->ae_bias_ctrl =
+		v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_AUTO_EXPOSURE_BIAS,
+				       ARRAY_SIZE(vd56g3_ev_bias_qmenu) - 1,
+				       (ARRAY_SIZE(vd56g3_ev_bias_qmenu) + 1) /
+				       2 - 1,
+				       vd56g3_ev_bias_qmenu);
 
 	/*
 	 * Analog gain [1, 8] is computed with the following logic :
@@ -1320,10 +1325,11 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 		sensor->slave_ctrl =
 			v4l2_ctrl_new_custom(hdl, &vd56g3_slave_ctrl, NULL);
 	if (sensor->ext_leds_mask)
-		sensor->led_ctrl = v4l2_ctrl_new_std_menu(
-			hdl, ops, V4L2_CID_FLASH_LED_MODE,
-			V4L2_FLASH_LED_MODE_FLASH, 0,
-			V4L2_FLASH_LED_MODE_FLASH);
+		sensor->led_ctrl =
+			v4l2_ctrl_new_std_menu(hdl, ops,
+					       V4L2_CID_FLASH_LED_MODE,
+					       V4L2_FLASH_LED_MODE_FLASH, 0,
+					       V4L2_FLASH_LED_MODE_FLASH);
 
 	if (hdl->error) {
 		ret = hdl->error;
@@ -1386,7 +1392,7 @@ static int vd56g3_stream_on(struct vd56g3 *sensor)
 	if (ret)
 		return ret;
 
-	/* Setup default GPIO values; could be overriden by V4L2 ctrl setup */
+	/* Setup default GPIO values; could be overridden by V4L2 ctrl setup */
 	ret = vd56g3_write_gpiox(sensor, GENMASK(VD56G3_NB_GPIOS - 1, 0));
 	if (ret)
 		return ret;
@@ -1500,7 +1506,7 @@ static const struct v4l2_subdev_video_ops vd56g3_video_ops = {
  * Pad ops
  */
 
-/* Media bus code is dependant of :
+/* Media bus code is dependent of :
  *      - 8bits or 10bits output
  *      - variant : Mono or RGB
  *      - H/V flips parameters in case of RGB
@@ -2023,8 +2029,9 @@ static int vd56g3_runtime_suspend(struct device *dev)
 	return vd56g3_power_off(vd56g3);
 }
 
-static const struct dev_pm_ops vd56g3_pm_ops = { SET_RUNTIME_PM_OPS(
-	vd56g3_runtime_suspend, vd56g3_runtime_resume, NULL) };
+static const struct dev_pm_ops vd56g3_pm_ops = {
+	SET_RUNTIME_PM_OPS(vd56g3_runtime_suspend, vd56g3_runtime_resume, NULL)
+};
 
 /* ----------------------------------------------------------------------------
  * Probe and initialization
@@ -2096,7 +2103,7 @@ static int vd56g3_check_csi_conf(struct vd56g3 *sensor,
 		goto done;
 	}
 	if (ep.nr_of_link_frequencies != 1 ||
-	    (ep.link_frequencies[0] != ((n_lanes == 2) ?
+	    (ep.link_frequencies[0] != (n_lanes == 2 ?
 						VD56G3_LINK_FREQ_DEF_2LANES :
 						VD56G3_LINK_FREQ_DEF_1LANE))) {
 		dev_err(&client->dev, "Link frequency not supported: %lld\n",
@@ -2218,8 +2225,9 @@ static int vd56g3_parse_dt(struct vd56g3 *sensor)
 	int ret;
 
 #if KERNEL_VERSION(5, 2, 0) > LINUX_VERSION_CODE
-	endpoint = fwnode_graph_get_next_endpoint(
-		of_fwnode_handle(dev->of_node), NULL);
+	endpoint =
+		fwnode_graph_get_next_endpoint(of_fwnode_handle(dev->of_node),
+					       NULL);
 #else
 	endpoint = fwnode_graph_get_endpoint_by_id(dev_fwnode(dev), 0, 0, 0);
 #endif
@@ -2402,7 +2410,7 @@ static int vd56g3_probe(struct i2c_client *client)
 		return ret;
 	}
 
-	/* Get (and check) ressources : power regs, ext clock, reset gpio */
+	/* Get (and check) resources : power regs, ext clock, reset gpio */
 	ret = vd56g3_get_regulators(sensor);
 	if (ret)
 		return dev_err_probe(dev, ret, "Failed to get regulators.");
