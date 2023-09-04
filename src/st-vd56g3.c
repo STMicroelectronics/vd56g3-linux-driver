@@ -621,16 +621,9 @@ static int vd56g3_wait_state(struct vd56g3 *sensor, int state)
  * Controls: definitions, helpers and handlers
  */
 
-static const char *const vd56g3_tp_menu[] = {
-	"Disabled",
-	"Solid",
-	"Colorbar",
-	"Gradbar",
-	"Hgrey",
-	"Vgrey",
-	"Dgrey",
-	"PN28"
-};
+static const char *const vd56g3_tp_menu[] = { "Disabled", "Solid", "Colorbar",
+					      "Gradbar",  "Hgrey", "Vgrey",
+					      "Dgrey",	  "PN28" };
 
 static const s64 vd56g3_ev_bias_qmenu[] = { -4000, -3500, -3000, -2500, -2000,
 					    -1500, -1000, -500,	 0,	500,
@@ -1019,13 +1012,13 @@ static const struct v4l2_ctrl_ops vd56g3_ctrl_ops = {
  * :type:   ``V4L2_CTRL_TYPE_INTEGER``
  */
 static const struct v4l2_ctrl_config vd56g3_temp_ctrl = {
-	.ops		= &vd56g3_ctrl_ops,
-	.id		= V4L2_CID_TEMPERATURE,
-	.name		= "Temperature in celsius",
-	.type		= V4L2_CTRL_TYPE_INTEGER,
-	.min		= -1024,
-	.max		= 1023,
-	.step		= 1,
+	.ops = &vd56g3_ctrl_ops,
+	.id = V4L2_CID_TEMPERATURE,
+	.name = "Temperature in celsius",
+	.type = V4L2_CTRL_TYPE_INTEGER,
+	.min = -1024,
+	.max = 1023,
+	.step = 1,
 };
 
 /**
@@ -1044,14 +1037,14 @@ static const struct v4l2_ctrl_config vd56g3_temp_ctrl = {
  * :def:    30
  */
 static const struct v4l2_ctrl_config vd56g3_ae_target_ctrl = {
-	.ops		= &vd56g3_ctrl_ops,
-	.id		= V4L2_CID_AE_TARGET_PERCENTAGE,
-	.name		= "AE - Light level target (%)",
-	.type		= V4L2_CTRL_TYPE_INTEGER,
-	.min		= 0,
-	.max		= 100,
-	.def		= 30,
-	.step		= 1
+	.ops = &vd56g3_ctrl_ops,
+	.id = V4L2_CID_AE_TARGET_PERCENTAGE,
+	.name = "AE - Light level target (%)",
+	.type = V4L2_CTRL_TYPE_INTEGER,
+	.min = 0,
+	.max = 100,
+	.def = 30,
+	.step = 1
 };
 
 /**
@@ -1075,14 +1068,14 @@ static const struct v4l2_ctrl_config vd56g3_ae_target_ctrl = {
  * :def:    0.54 (0x08c)
  */
 static const struct v4l2_ctrl_config vd56g3_ae_step_prop_ctrl = {
-	.ops		= &vd56g3_ctrl_ops,
-	.id		= V4L2_CID_AE_STEP_PROPORTION,
-	.name		= "AE - Convg. step proportion",
-	.type		= V4L2_CTRL_TYPE_INTEGER,
-	.min		= 0x000,
-	.max		= 0x100,
-	.def		= 0x08c,
-	.step		= 1
+	.ops = &vd56g3_ctrl_ops,
+	.id = V4L2_CID_AE_STEP_PROPORTION,
+	.name = "AE - Convg. step proportion",
+	.type = V4L2_CTRL_TYPE_INTEGER,
+	.min = 0x000,
+	.max = 0x100,
+	.def = 0x08c,
+	.step = 1
 };
 
 /**
@@ -1108,14 +1101,14 @@ static const struct v4l2_ctrl_config vd56g3_ae_step_prop_ctrl = {
  * :def:    0.35 (0x2ccc)
  */
 static const struct v4l2_ctrl_config vd56g3_ae_leak_prop_ctrl = {
-	.ops		= &vd56g3_ctrl_ops,
-	.id		= V4L2_CID_AE_LEAK_PROPORTION,
-	.name		= "AE - Convg. leak proportion",
-	.type		= V4L2_CTRL_TYPE_INTEGER,
-	.min		= 0x0000,
-	.max		= 0x8000,
-	.def		= 0x2ccc,
-	.step		= 1
+	.ops = &vd56g3_ctrl_ops,
+	.id = V4L2_CID_AE_LEAK_PROPORTION,
+	.name = "AE - Convg. leak proportion",
+	.type = V4L2_CTRL_TYPE_INTEGER,
+	.min = 0x0000,
+	.max = 0x8000,
+	.def = 0x2ccc,
+	.step = 1
 };
 
 /**
@@ -1132,14 +1125,14 @@ static const struct v4l2_ctrl_config vd56g3_ae_leak_prop_ctrl = {
  *
  */
 static const struct v4l2_ctrl_config vd56g3_darkcal_pedestal_ctrl = {
-	.ops		= &vd56g3_ctrl_ops,
-	.id		= V4L2_CID_DARKCAL_PEDESTAL,
-	.name		= "Dark Calibration Pedestal",
-	.type		= V4L2_CTRL_TYPE_INTEGER,
-	.min		= 0,
-	.max		= 255,
-	.step		= 1,
-	.def		= 0x40,
+	.ops = &vd56g3_ctrl_ops,
+	.id = V4L2_CID_DARKCAL_PEDESTAL,
+	.name = "Dark Calibration Pedestal",
+	.type = V4L2_CTRL_TYPE_INTEGER,
+	.min = 0,
+	.max = 255,
+	.step = 1,
+	.def = 0x40,
 };
 
 /**
@@ -1156,14 +1149,14 @@ static const struct v4l2_ctrl_config vd56g3_darkcal_pedestal_ctrl = {
  *
  */
 static const struct v4l2_ctrl_config vd56g3_slave_ctrl = {
-	.ops		= &vd56g3_ctrl_ops,
-	.id		= V4L2_CID_SLAVE_MODE,
-	.name		= "VT Slave Mode",
-	.type		= V4L2_CTRL_TYPE_BOOLEAN,
-	.min		= 0,
-	.max		= 1,
-	.step		= 1,
-	.def		= 1,
+	.ops = &vd56g3_ctrl_ops,
+	.id = V4L2_CID_SLAVE_MODE,
+	.name = "VT Slave Mode",
+	.type = V4L2_CTRL_TYPE_BOOLEAN,
+	.min = 0,
+	.max = 1,
+	.step = 1,
+	.def = 1,
 };
 
 #if KERNEL_VERSION(4, 13, 0) > LINUX_VERSION_CODE
@@ -1179,14 +1172,14 @@ static const struct v4l2_ctrl_config vd56g3_slave_ctrl = {
  * :def:    0x100
  */
 static const struct v4l2_ctrl_config vd56g3_dgain_ctrl = {
-	.ops		= &vd56g3_ctrl_ops,
-	.id		= V4L2_CID_DIGITAL_GAIN,
-	.name		= "Digital Gain",
-	.type		= V4L2_CTRL_TYPE_INTEGER,
-	.min		= 0x100,
-	.max		= 0x800,
-	.step		= 1,
-	.def		= 0x100,
+	.ops = &vd56g3_ctrl_ops,
+	.id = V4L2_CID_DIGITAL_GAIN,
+	.name = "Digital Gain",
+	.type = V4L2_CTRL_TYPE_INTEGER,
+	.min = 0x100,
+	.max = 0x800,
+	.step = 1,
+	.def = 0x100,
 };
 #endif
 
