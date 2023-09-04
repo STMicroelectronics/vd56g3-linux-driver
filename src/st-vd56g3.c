@@ -122,6 +122,7 @@ int pm_runtime_get_if_in_use(struct device *dev)
 #define VD56G3_REG_DUSTER_CTRL				VD56G3_REG_8BIT(0x0318)
 #define VD56G3_DUSTER_DISABLE				0
 #define VD56G3_DUSTER_ENABLE_DEF_MODULES		0x13
+#define VD56G3_REG_ISL_ENABLE				VD56G3_REG_8BIT(0x0333)
 #define VD56G3_REG_DARKCAL_CTRL				VD56G3_REG_8BIT(0x0340)
 #define VD56G3_DARKCAL_ENABLE				1
 #define VD56G3_DARKCAL_DISABLE_DARKAVG			2
@@ -1365,6 +1366,7 @@ static int vd56g3_stream_on(struct vd56g3 *sensor)
 	vd56g3_write(sensor, VD56G3_REG_OIF_CSI_BITRATE, csi_mbps, &ret);
 	vd56g3_write(sensor, VD56G3_REG_OIF_IMG_CTRL,
 		     vd56g3_get_datatype(sensor->img_mbus_code), &ret);
+	vd56g3_write(sensor, VD56G3_REG_ISL_ENABLE, 0, &ret);
 
 	/* configure ROIs and bin mode */
 	vd56g3_write(sensor, VD56G3_REG_READOUT_CTRL,
