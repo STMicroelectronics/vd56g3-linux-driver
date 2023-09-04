@@ -199,16 +199,12 @@ int pm_runtime_get_if_in_use(struct device *dev)
 #define VD56G3_VT_CLOCK_DIV				5
 
 /* Line length and Frame length (valid for 10bits ADC only) */
-/* line length for normal (10bits) ADC mode */
-#define VD56G3_LINE_LENGTH_MIN				1236
-/* This limits the framerate to 88.5FPS at full resolution */
-#define VD56G3_FRAME_LENGTH_OFFSET			110
-/* (1/60)/(line_length/pixel_clock) */
-#define VD56G3_FRAME_LENGTH_DEF_60FPS			2168
+#define VD56G3_LINE_LENGTH_MIN				1236				// line length for normal (10bits) ADC mode
+#define VD56G3_FRAME_LENGTH_OFFSET			110				// This limits the framerate to 88.5FPS at full resolution
+#define VD56G3_FRAME_LENGTH_DEF_60FPS			2168				// (1/60)/(line_length/pixel_clock)
 
 /* Exposure settings */
-/* EXP_COARSE_INTG_MARGIN + 7 */
-#define VD56G3_EXPOSURE_OFFSET				(68 + 7)
+#define VD56G3_EXPOSURE_OFFSET				(68 + 7)			// EXP_COARSE_INTG_MARGIN + 7
 #define VD56G3_EXPOSURE_DEFAULT				1420
 
 /* Output Interface settings */
@@ -219,8 +215,7 @@ int pm_runtime_get_if_in_use(struct device *dev)
 /* GPIOs */
 #define VD56G3_NB_GPIOS					8
 
-/* TODO : unnecessary */
-#define VD56G3_WRITE_MULTIPLE_CHUNK_MAX			16
+#define VD56G3_WRITE_MULTIPLE_CHUNK_MAX			16				// TODO : unnecessary
 
 /* parse-SNIP: Custom-CIDs*/
 #define V4L2_CID_TEMPERATURE			(V4L2_CID_USER_BASE | 0x1020)
@@ -626,7 +621,7 @@ static int vd56g3_wait_state(struct vd56g3 *sensor, int state)
  * Controls: definitions, helpers and handlers
  */
 
-static const char *const vd56g3_test_pattern_menu[] = {
+static const char *const vd56g3_tp_menu[] = {
 	"Disabled",
 	"Solid",
 	"Colorbar",
@@ -908,8 +903,9 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	unsigned int frame_length;
 	unsigned int expo_max;
+	unsigned int ae_compensation;
 	bool is_auto;
-	int tmp, ret;
+	int ret;
 
 	if (ctrl->flags & V4L2_CTRL_FLAG_READ_ONLY)
 		return 0;
@@ -965,10 +961,11 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 		ret = vd56g3_lock_exposure(sensor, ctrl->val);
 		break;
 	case V4L2_CID_AUTO_EXPOSURE_BIAS:
-		tmp = DIV_ROUND_CLOSEST((int)vd56g3_ev_bias_qmenu[ctrl->val] *
-					256, 1000);
-		ret = vd56g3_write(sensor, VD56G3_REG_AE_COMPENSATION, tmp,
-				   NULL);
+		ae_compensation =
+			DIV_ROUND_CLOSEST((int)vd56g3_ev_bias_qmenu[ctrl->val] *
+					  256, 1000);
+		ret = vd56g3_write(sensor, VD56G3_REG_AE_COMPENSATION,
+				   ae_compensation, NULL);
 		break;
 	case V4L2_CID_VBLANK:
 		ret = vd56g3_write(sensor, VD56G3_REG_FRAME_LENGTH,
@@ -1220,8 +1217,6 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 	const struct v4l2_ctrl_ops *ops = &vd56g3_ctrl_ops;
 	struct v4l2_ctrl_handler *hdl = &sensor->ctrl_handler;
 	struct v4l2_ctrl *ctrl;
-	unsigned int test_pattern_menu_size =
-		ARRAY_SIZE(vd56g3_test_pattern_menu) - 1;
 	int ret;
 
 	v4l2_ctrl_handler_init(hdl, 25);
@@ -1247,8 +1242,8 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 
 	sensor->patgen_ctrl =
 		v4l2_ctrl_new_std_menu_items(hdl, ops, V4L2_CID_TEST_PATTERN,
-					     test_pattern_menu_size, 0, 0,
-					     vd56g3_test_pattern_menu);
+					     ARRAY_SIZE(vd56g3_tp_menu) - 1, 0,
+					     0, vd56g3_tp_menu);
 
 	ctrl = v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_LINK_FREQ,
 				      ARRAY_SIZE(vd56g3_link_freq_1lane) - 1, 0,
