@@ -59,6 +59,10 @@ int dev_err_probe(const struct device *dev, int err, const char *fmt, ...)
 }
 #endif
 
+#if KERNEL_VERSION(4, 16, 0) > LINUX_VERSION_CODE
+#include <linux/of_device.h>
+#endif
+
 #if KERNEL_VERSION(4, 5, 0) > LINUX_VERSION_CODE
 int pm_runtime_get_if_in_use(struct device *dev)
 {
@@ -85,6 +89,8 @@ int pm_runtime_get_if_in_use(struct device *dev)
 #define VD56G3_MODEL_ID					0x5603
 #define VD56G3_REG_REVISION				VD56G3_REG_16BIT(0x0002)
 #define VD56G3_REG_OPTICAL_REVISION			VD56G3_REG_8BIT(0x001a)
+#define VD56G3_OPTICAL_REVISION_MONO			0
+#define VD56G3_OPTICAL_REVISION_BAYER			1
 #define VD56G3_REG_FWPATCH_REVISION			VD56G3_REG_16BIT(0x001e)
 // TODO : replace 3 next registers by VTPATCH_ID to be aligned with UM
 #define VD56G3_REG_VTIMING_RD_REVISION			VD56G3_REG_8BIT(0x0020)
@@ -243,8 +249,13 @@ static const char *const vd56g3_supply_names[] = {
 #define VD56G3_NUM_SUPPLIES		ARRAY_SIZE(vd56g3_supply_names)
 
 /* -----------------------------------------------------------------------------
- * Modes and formats
+ * Models, Modes and formats
  */
+
+enum vd56g3_models {
+	VD56G3_MODEL_VD56G3, // Mono variant
+	VD56G3_MODEL_VD66GY, // Bayer variant
+};
 
 enum vd56g3_bin_mode {
 	VG56G3_BIN_MODE_NORMAL,
@@ -433,7 +444,7 @@ struct vd56g3 {
 	u32 gpios[VD56G3_NB_GPIOS];
 	bool ext_vt_sync;
 	unsigned long ext_leds_mask;
-	bool is_rgb;
+	bool is_mono;
 	/* lock to protect all members below */
 	struct mutex lock;
 	struct v4l2_ctrl_handler ctrl_handler;
@@ -1522,7 +1533,7 @@ endloops:
 	if (i_bpp >= ARRAY_SIZE(vd56g3_mbus_codes))
 		i_bpp = 0;
 
-	if (!sensor->is_rgb)
+	if (sensor->is_mono)
 		j = 0;
 	else
 		j = 1 + (sensor->hflip_ctrl->val ? 1 : 0) +
@@ -2299,19 +2310,39 @@ static int vd56g3_prepare_clock_tree(struct vd56g3 *sensor)
 	return 0;
 }
 
+#if KERNEL_VERSION(4, 16, 0) > LINUX_VERSION_CODE
+static const struct of_device_id vd56g3_dt_ids[] = {
+	{ .compatible = "st,st-vd56g3", .data = (void *)VD56G3_MODEL_VD56G3 },
+	{ .compatible = "st,st-vd66gy", .data = (void *)VD56G3_MODEL_VD66GY },
+	{ /* sentinel */ }
+};
+#endif
+
 static int vd56g3_detect(struct vd56g3 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
-	int id = 0;
+	struct device *dev = &client->dev;
+	unsigned int model;
+	int model_id = 0;
 	int device_revision = 0;
 	int optical_revision = 0;
 
-	id = vd56g3_read(sensor, VD56G3_REG_MODEL_ID);
-	if (id < 0)
-		return id;
+#if KERNEL_VERSION(4, 16, 0) > LINUX_VERSION_CODE
+	const struct of_device_id *dt_ids;
 
-	if (id != VD56G3_MODEL_ID) {
-		dev_warn(&client->dev, "Unsupported sensor id %x", id);
+	dt_ids = of_match_device(of_match_ptr(vd56g3_dt_ids), dev);
+	if (dt_ids)
+		model = (uintptr_t)dt_ids->data;
+#else
+	model = (uintptr_t)device_get_match_data(dev);
+#endif
+
+	model_id = vd56g3_read(sensor, VD56G3_REG_MODEL_ID);
+	if (model_id < 0)
+		return model_id;
+
+	if (model_id != VD56G3_MODEL_ID) {
+		dev_warn(&client->dev, "Unsupported sensor id %x", model_id);
 		return -ENODEV;
 	}
 
@@ -2329,7 +2360,16 @@ static int vd56g3_detect(struct vd56g3 *sensor)
 	if (optical_revision < 0)
 		return optical_revision;
 
-	sensor->is_rgb = ((optical_revision & 1) == 1);
+	sensor->is_mono =
+		((optical_revision & 1) == VD56G3_OPTICAL_REVISION_MONO);
+	if ((sensor->is_mono && model == VD56G3_MODEL_VD66GY) ||
+	    (!sensor->is_mono && model == VD56G3_MODEL_VD56G3)) {
+		dev_warn(&client->dev,
+			 "Found %s sensor, while %s model is defined in DT",
+			 (sensor->is_mono) ? "Mono" : "Bayer",
+			 (model == VD56G3_MODEL_VD56G3) ? "vd56g3" : "vd66gy");
+		return -ENODEV;
+	}
 
 	return 0;
 }
@@ -2507,10 +2547,13 @@ static void vd56g3_remove(struct i2c_client *client)
 #endif
 }
 
+#if KERNEL_VERSION(4, 16, 0) <= LINUX_VERSION_CODE
 static const struct of_device_id vd56g3_dt_ids[] = {
-	{ .compatible = "st,st-vd56g3" },
+	{ .compatible = "st,st-vd56g3", .data = (void *)VD56G3_MODEL_VD56G3 },
+	{ .compatible = "st,st-vd66gy", .data = (void *)VD56G3_MODEL_VD66GY },
 	{ /* sentinel */ }
 };
+#endif
 MODULE_DEVICE_TABLE(of, vd56g3_dt_ids);
 
 static struct i2c_driver vd56g3_i2c_driver = {
