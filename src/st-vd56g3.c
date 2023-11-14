@@ -445,6 +445,7 @@ struct vd56g3 {
 	bool ext_vt_sync;
 	unsigned long ext_leds_mask;
 	bool is_mono;
+	bool is_fastboot;
 	/* lock to protect all members below */
 	struct mutex lock;
 	struct v4l2_ctrl_handler ctrl_handler;
@@ -1994,10 +1995,12 @@ static int vd56g3_power_patch(struct vd56g3 *sensor)
 		return ret;
 	}
 
-	ret = vd56g3_patch(sensor);
-	if (ret) {
-		dev_err(&client->dev, "sensor patch failed %d", ret);
-		return ret;
+	if (!sensor->is_fastboot) {
+		ret = vd56g3_patch(sensor);
+		if (ret) {
+			dev_err(&client->dev, "sensor patch failed %d", ret);
+			return ret;
+		}
 	}
 
 	ret = vd56g3_boot(sensor);
@@ -2006,10 +2009,12 @@ static int vd56g3_power_patch(struct vd56g3 *sensor)
 		return ret;
 	}
 
-	ret = vd56g3_vtpatch(sensor);
-	if (ret) {
-		dev_err(&client->dev, "sensor VT patch failed %d", ret);
-		return ret;
+	if (!sensor->is_fastboot) {
+		ret = vd56g3_vtpatch(sensor);
+		if (ret) {
+			dev_err(&client->dev, "sensor VT patch failed %d", ret);
+			return ret;
+		}
 	}
 
 	return 0;
@@ -2350,7 +2355,11 @@ static int vd56g3_detect(struct vd56g3 *sensor)
 	if (device_revision < 0)
 		return device_revision;
 
-	if ((device_revision >> 8) != 0x20) {
+	if ((device_revision >> 8) == 0x20) {
+		sensor->is_fastboot = false;
+	} else if ((device_revision >> 8) == 0x31) {
+		sensor->is_fastboot = true;
+	} else {
 		dev_warn(&client->dev, "Unsupported Cut version %x",
 			 device_revision);
 		return -ENODEV;
@@ -2511,6 +2520,8 @@ static int vd56g3_probe(struct i2c_client *client)
 	}
 
 	/* Sensor could now be powered off (after the autosuspend delay) */
+	if (sensor->is_fastboot)
+		pm_runtime_set_autosuspend_delay(dev, 1000);
 	pm_runtime_mark_last_busy(dev);
 	pm_runtime_put_autosuspend(dev);
 
