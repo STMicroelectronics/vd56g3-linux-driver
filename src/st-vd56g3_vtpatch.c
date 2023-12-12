@@ -1397,6 +1397,11 @@ static const u8 vtpatch[] = {
 	0x3d, 0x4d, 0x00, 0x00,				// 0xbddc,
 	0x78, 0x30, 0x00, 0x00,				// 0xbde0,
 	0x00, 0x00, 0x60, 0x00,				// 0xbde4,
+
+	VT_REVISION,					// 0xd9f8
+	VT_REVISION,					// 0xaffc
+	VT_REVISION,					// 0xbbb4
+	VT_REVISION,					// 0xb898
 };
 
 struct vtram_area {
@@ -1412,6 +1417,10 @@ struct vtram_area vtpatch_desc[] = {
 	{ .offset = 0xb8a0, .size = 0xb90f - 0xb8a0 + 1 },
 	{ .offset = 0xb93c, .size = 0xba33 - 0xb93c + 1 },
 	{ .offset = 0xbbbc, .size = 0xbde7 - 0xbbbc + 1 },
+	{ .offset = 0xd9f8, .size = 1 },
+	{ .offset = 0xaffc, .size = 1 },
+	{ .offset = 0xbbb4, .size = 1 },
+	{ .offset = 0xb898, .size = 1 },
 };
 
 int vtpatch_area_nb = ARRAY_SIZE(vtpatch_desc);

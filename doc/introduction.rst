@@ -2,7 +2,7 @@
 Introduction
 ============
 
-This document describes the **Linux VD56G3 driver** providing control over the VD56G3 : a global shutter image sensor optimized for near infrared scenes.
+This document describes the **Linux VD56G3 driver** providing control over the VD56G3 : a portrait-oriented global shutter image sensor optimized for near infrared scenes.
 
 .. Note ::
 
@@ -29,4 +29,4 @@ This document describes the **Linux VD56G3 driver** providing control over the V
     VD56G3's features **NOT supported** in the driver:
 
     - Optical Flow
-    - Programmable sequences of 4-frame contexts, including frame parameters
+    - Programmable sequences of 4-frame contexts

@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.11.0] - 2023-12-12
+- Add Fox Fastboot (cut3) support
+- Proper handling of Mono/RGB variants through compatible string
+- Status Linues are now disabled by default
+- Default V4L2_CID_FLASH_LED_MODE ctrl to OFF
+- Better handling of maximum framerate (now resolution-dependant)
+- Proper split between native and default (recommended) resolution
+- Drop 240x320 resolution
+- Improved backward compatibility (down to k4.9)
+
 ## [0.10.0] - 2023-05-29
 - Add support of kernel 6.1
 - Backward compatibility with all LTS kernels (down to k4.14)

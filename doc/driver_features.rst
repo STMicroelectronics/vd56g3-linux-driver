@@ -7,6 +7,14 @@ The VD56G3 linux driver support both :
     - VD56G3 - Monochrome version
     - VD66GY - RGB Bayer version
 
+The connected camera must be declared accordingly in device tree through the ``compatible`` property : ``st,st-vd56g3`` for Mono version and ``st,st-vd66gy`` for RGB version.
+Additionnal checks are runs during driver's ``probe`` to ensure that the right sensor is detected.
+
+Since v0.11, the linux driver support both :
+
+    - Cut 2
+    - Cut 3 (FastBoot)
+
 
 Supported Modes
 ===============
@@ -29,7 +37,7 @@ Media Bus codes for RGB variant :
 
 - `MEDIA_BUS_FMT_SGRBG8_1X8 <https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/subdev-formats.html?highlight=media_bus_fmt_sgrbg8_1x8#bayer-formats>`_
 - `MEDIA_BUS_FMT_SGRBG10_1X10 <https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/subdev-formats.html?highlight=media_bus_fmt_sgrbg10_1x10#bayer-formats>`_
-- Or equivalent bayer format depending of the H/V flip variations (RGGB, BGGR, GBRG)
+- And equivalent bayer format depending of the H/V flip variations (RGGB, BGGR, GBRG)
 
 
 Supported Controls
