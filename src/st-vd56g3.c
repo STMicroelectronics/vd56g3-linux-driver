@@ -270,7 +270,7 @@ struct vd56g3_mode {
 /**
  * DOC: Supported Modes
  *
- * The vd56g3 driver supports 8 modes described below :
+ * The vd56g3 driver supports 9 modes described below :
  *
  * ======= ======== ============ ====================
  *  Width   Height   Binning	  Comment
@@ -287,8 +287,11 @@ struct vd56g3_mode {
  * ======= ======== ============ ====================
  *
  * Each mode defaults to 60FPS. In addition, the framerate could be adjusted in
- * a continuous manner up to 88FPS (making use of the ``V4L2_CID_VBLANK``
- * control).
+ * a continuous manner (making use of the ``V4L2_CID_VBLANK`` control).
+ *
+ * For native resolution the framerate can reach 88FPS.
+ * For smaller resolutions, the maximum framerate will be much higher : for
+ * example, it can reach 220FPS in 640x480 non-binned mode.
  */
 
 static const struct vd56g3_mode vd56g3_supported_modes[] = {

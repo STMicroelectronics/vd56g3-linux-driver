@@ -22,3 +22,7 @@ Documentation History
 [0.5] - 2023.04.27
 ------------------
 - Update 'Supported Controls' section following driver updates
+
+[0.6] - 2023.12.12
+------------------
+- Update 'Driver Features' section (supported sensor versions)
