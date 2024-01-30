@@ -1,8 +1,3 @@
-VD56G3 (aka Fox) Driver
-=======================
-
-This repository contains a V4L2 linux driver for the vd56g3 (aka Fox) sensor.
-
 Repository Organization
 -----------------------
 
