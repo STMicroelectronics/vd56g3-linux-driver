@@ -219,8 +219,6 @@ int pm_runtime_get_if_in_use(struct device *dev)
 /* GPIOs */
 #define VD56G3_NB_GPIOS					8
 
-#define VD56G3_WRITE_MULTIPLE_CHUNK_MAX			16				// TODO : unnecessary
-
 /* parse-SNIP: Custom-CIDs*/
 #define V4L2_CID_TEMPERATURE			(V4L2_CID_USER_BASE | 0x1020)
 #define V4L2_CID_AE_TARGET_PERCENTAGE		(V4L2_CID_USER_BASE | 0x1021)
@@ -488,41 +486,29 @@ static inline struct v4l2_subdev *ctrl_to_sd(struct v4l2_ctrl *ctrl)
  * HW access
  */
 
-static int get_chunk_size(struct vd56g3 *sensor)
-{
-	int max_write_len = VD56G3_WRITE_MULTIPLE_CHUNK_MAX;
-	struct i2c_adapter *adapter = sensor->i2c_client->adapter;
-
-	if (adapter->quirks && adapter->quirks->max_write_len)
-		max_write_len = adapter->quirks->max_write_len - 2;
-
-	max_write_len = min(max_write_len, VD56G3_WRITE_MULTIPLE_CHUNK_MAX);
-
-	return max(max_write_len, 1);
-}
-
+/* Big endian register addresses and 8b, 16b or 32b little endian values .*/
 static int vd56g3_read_multiple(struct vd56g3 *sensor, u32 reg,
 				unsigned int len)
 {
 	struct i2c_client *client = sensor->i2c_client;
-	struct i2c_msg msg[2];
-	u8 buf[2];
-	u8 val[sizeof(u32)] = { 0 };
+	struct i2c_msg msg[2] = { 0 };
+	u8 addr_buf[2] = { 0 };
+	u8 data_buf[sizeof(u32)] = { 0 };
 	int ret;
 
 	if (len > sizeof(u32))
 		return -EINVAL;
-	buf[0] = reg >> 8;
-	buf[1] = reg & 0xff;
+
+	put_unaligned_be16(reg, addr_buf);
 
 	msg[0].addr = client->addr;
 	msg[0].flags = client->flags;
-	msg[0].buf = buf;
-	msg[0].len = sizeof(buf);
+	msg[0].buf = addr_buf;
+	msg[0].len = sizeof(addr_buf);
 
 	msg[1].addr = client->addr;
 	msg[1].flags = client->flags | I2C_M_RD;
-	msg[1].buf = val;
+	msg[1].buf = data_buf;
 	msg[1].len = len;
 
 	ret = i2c_transfer(client->adapter, msg, 2);
@@ -532,7 +518,7 @@ static int vd56g3_read_multiple(struct vd56g3 *sensor, u32 reg,
 		return ret;
 	}
 
-	return get_unaligned_le32(val);
+	return get_unaligned_le32(data_buf);
 }
 
 static inline int vd56g3_read(struct vd56g3 *sensor, u32 reg)
@@ -541,22 +527,23 @@ static inline int vd56g3_read(struct vd56g3 *sensor, u32 reg)
 				    (reg >> VD56G3_REG_SIZE_SHIFT) & 7);
 }
 
+/* Big endian register addresses and 8b, 16b or 32b little endian values .*/
 static int vd56g3_write_multiple(struct vd56g3 *sensor, u32 reg, const u8 *data,
 				 unsigned int len, int *err)
 {
 	struct i2c_client *client = sensor->i2c_client;
 	struct i2c_msg msg;
-	u8 buf[VD56G3_WRITE_MULTIPLE_CHUNK_MAX + 2];
+	u8 buf[sizeof(u32) + 2] = { 0 };
 	unsigned int i;
 	int ret;
 
 	if (err && *err)
 		return *err;
 
-	if (len > VD56G3_WRITE_MULTIPLE_CHUNK_MAX)
+	if (len > sizeof(u32))
 		return -EINVAL;
-	buf[0] = reg >> 8;
-	buf[1] = reg & 0xff;
+
+	put_unaligned_be16(reg, buf);
 	for (i = 0; i < len; i++)
 		buf[i + 2] = data[i];
 
@@ -588,12 +575,11 @@ static inline int vd56g3_write(struct vd56g3 *sensor, u32 reg, u32 val,
 static int vd56g3_write_array(struct vd56g3 *sensor, u32 reg, unsigned int nb,
 			      const u8 *array)
 {
-	const unsigned int chunk_size = get_chunk_size(sensor);
-	int ret;
 	unsigned int sz;
+	int ret;
 
 	while (nb) {
-		sz = min(nb, chunk_size);
+		sz = min(nb, (unsigned int)4);
 		ret = vd56g3_write_multiple(sensor, reg, array, sz, NULL);
 		if (ret < 0)
 			return ret;
