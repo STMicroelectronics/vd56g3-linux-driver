@@ -12,6 +12,7 @@
 #include <linux/iopoll.h>
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
+#include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 
 #include <asm/unaligned.h>
@@ -415,6 +416,13 @@ static const unsigned int vd56g3_mbus_codes[2][5] = {
 	},
 };
 
+/* Big endian register addresses and 8b, 16b or 32b little endian values .*/
+static const struct regmap_config vd56g3_regmap_config = {
+	.reg_bits = 16,
+	.val_bits = 8,
+	.reg_format_endian = REGMAP_ENDIAN_BIG,
+};
+
 enum vd56g3_pad_types {
 	IMAGE_PAD,
 	NUM_PADS
@@ -433,6 +441,7 @@ struct vd56g3 {
 	struct regulator_bulk_data supplies[VD56G3_NUM_SUPPLIES];
 	struct gpio_desc *reset_gpio;
 	struct clk *xclk;
+	struct regmap *regmap;
 	u32 ext_clock;
 	u32 pll_prediv;
 	u32 pll_mult;
@@ -483,137 +492,95 @@ static inline struct v4l2_subdev *ctrl_to_sd(struct v4l2_ctrl *ctrl)
 }
 
 /* ----------------------------------------------------------------------------
- * HW access
+ * HW access : Big endian reg addresses and 8b, 16b or 32b little endian values
  */
 
-/* Big endian register addresses and 8b, 16b or 32b little endian values .*/
-static int vd56g3_read_multiple(struct vd56g3 *sensor, u32 reg,
-				unsigned int len)
+static int vd56g3_read(struct vd56g3 *sensor, u32 reg)
 {
 	struct i2c_client *client = sensor->i2c_client;
-	struct i2c_msg msg[2] = { 0 };
-	u8 addr_buf[2] = { 0 };
-	u8 data_buf[sizeof(u32)] = { 0 };
+	unsigned int len = (reg >> VD56G3_REG_SIZE_SHIFT) & 7;
+	u8 buf[4];
 	int ret;
 
-	if (len > sizeof(u32))
-		return -EINVAL;
+	reg = reg & VD56G3_REG_ADDR_MASK;
 
-	put_unaligned_be16(reg, addr_buf);
-
-	msg[0].addr = client->addr;
-	msg[0].flags = client->flags;
-	msg[0].buf = addr_buf;
-	msg[0].len = sizeof(addr_buf);
-
-	msg[1].addr = client->addr;
-	msg[1].flags = client->flags | I2C_M_RD;
-	msg[1].buf = data_buf;
-	msg[1].len = len;
-
-	ret = i2c_transfer(client->adapter, msg, 2);
-	if (ret < 0) {
-		dev_dbg(&client->dev, "%s: %x i2c_transfer, reg: %x => %d\n",
-			__func__, client->addr, reg, ret);
+	ret = regmap_bulk_read(sensor->regmap, reg, buf, len);
+	if (ret) {
+		dev_err(&client->dev, "%s: Error reading reg 0x%4x: %d\n",
+			__func__, reg, ret);
 		return ret;
 	}
 
-	return get_unaligned_le32(data_buf);
+	switch (len) {
+	case 1:
+		return buf[0];
+	case 2:
+		return get_unaligned_le16(buf);
+	case 4:
+		return get_unaligned_le32(buf);
+	default:
+		dev_err(&client->dev,
+			"%s: Error invalid reg-width %u for reg 0x%04x\n",
+			__func__, len, reg);
+		return -EINVAL;
+	}
 }
 
-static inline int vd56g3_read(struct vd56g3 *sensor, u32 reg)
-{
-	return vd56g3_read_multiple(sensor, reg & VD56G3_REG_ADDR_MASK,
-				    (reg >> VD56G3_REG_SIZE_SHIFT) & 7);
-}
-
-/* Big endian register addresses and 8b, 16b or 32b little endian values .*/
-static int vd56g3_write_multiple(struct vd56g3 *sensor, u32 reg, const u8 *data,
-				 unsigned int len, int *err)
+static int vd56g3_write(struct vd56g3 *sensor, u32 reg, u32 val, int *err)
 {
 	struct i2c_client *client = sensor->i2c_client;
-	struct i2c_msg msg;
-	u8 buf[sizeof(u32) + 2] = { 0 };
-	unsigned int i;
+	unsigned int len = (reg >> VD56G3_REG_SIZE_SHIFT) & 7;
+	u8 buf[4];
 	int ret;
 
 	if (err && *err)
 		return *err;
 
-	if (len > sizeof(u32))
-		return -EINVAL;
-
-	put_unaligned_be16(reg, buf);
-	for (i = 0; i < len; i++)
-		buf[i + 2] = data[i];
-
-	msg.addr = client->addr;
-	msg.flags = client->flags;
-	msg.buf = buf;
-	msg.len = len + 2;
-
-	ret = i2c_transfer(client->adapter, &msg, 1);
-	if (ret < 0) {
-		dev_dbg(&client->dev, "%s: i2c_transfer, reg: %x => %d\n",
-			__func__, reg, ret);
-		if (err)
-			*err = ret;
-		return ret;
+	reg = reg & VD56G3_REG_ADDR_MASK;
+	switch (len) {
+	case 1:
+		buf[0] = val;
+		break;
+	case 2:
+		put_unaligned_le16(val, buf);
+		break;
+	case 4:
+		put_unaligned_le32(val, buf);
+		break;
+	default:
+		dev_err(&client->dev,
+			"%s: Error invalid reg-width %u for reg 0x%04x\n",
+			__func__, len, reg);
+		ret = -EINVAL;
+		goto out;
 	}
 
-	return 0;
+	ret = regmap_bulk_write(sensor->regmap, reg, buf, len);
+	if (ret)
+		dev_err(&client->dev, "%s: Error writing reg 0x%4x: %d\n",
+			__func__, reg, ret);
+
+out:
+	if (ret && err)
+		*err = ret;
+
+	return ret;
 }
 
-static inline int vd56g3_write(struct vd56g3 *sensor, u32 reg, u32 val,
-			       int *err)
-{
-	return vd56g3_write_multiple(sensor, reg & VD56G3_REG_ADDR_MASK,
-				     (u8 *)&val,
-				     (reg >> VD56G3_REG_SIZE_SHIFT) & 7, err);
-}
-
-static int vd56g3_write_array(struct vd56g3 *sensor, u32 reg, unsigned int nb,
+static int vd56g3_write_array(struct vd56g3 *sensor, u32 reg, unsigned int len,
 			      const u8 *array)
 {
-	unsigned int sz;
-	int ret;
-
-	while (nb) {
-		sz = min(nb, (unsigned int)4);
-		ret = vd56g3_write_multiple(sensor, reg, array, sz, NULL);
-		if (ret < 0)
-			return ret;
-		nb -= sz;
-		reg += sz;
-		array += sz;
-	}
-
-	return 0;
+	return regmap_bulk_write(sensor->regmap, reg, array, len);
 }
 
 static int vd56g3_poll_reg(struct vd56g3 *sensor, u32 reg, u8 poll_val)
 {
-	const unsigned int loop_delay_ms = 10;
-	const unsigned int timeout_ms = 500;
-	int ret;
-#if KERNEL_VERSION(5, 7, 0) > LINUX_VERSION_CODE
-	int loop_nb = timeout_ms / loop_delay_ms;
+	unsigned int val;
 
-	while (--loop_nb) {
-		ret = vd56g3_read(sensor, reg);
-		if (ret < 0)
-			return ret;
-		if (ret == poll_val)
-			return 0;
-		msleep(loop_delay_ms);
-	}
-	return -ETIMEDOUT;
-#else
-	return read_poll_timeout(vd56g3_read, ret,
-				 ((ret < 0) || (ret == poll_val)),
-				 loop_delay_ms * 1000, timeout_ms * 1000, false,
-				 sensor, reg);
-#endif
+	return regmap_read_poll_timeout(sensor->regmap,
+					reg & VD56G3_REG_ADDR_MASK, val,
+					(val == poll_val), 2000,
+					500 * USEC_PER_MSEC);
 }
 
 static int vd56g3_wait_state(struct vd56g3 *sensor, int state)
@@ -2446,6 +2413,11 @@ static int vd56g3_probe(struct i2c_client *client)
 	if (IS_ERR(sensor->reset_gpio))
 		return dev_err_probe(dev, PTR_ERR(sensor->reset_gpio),
 				     "Failed to get reset gpio.");
+
+	sensor->regmap = devm_regmap_init_i2c(client, &vd56g3_regmap_config);
+	if (IS_ERR(sensor->regmap))
+		return dev_err_probe(dev, PTR_ERR(sensor->regmap),
+				     "Failed to init regmap.");
 
 	/* Power ON */
 	ret = vd56g3_power_on(sensor);
