@@ -495,12 +495,15 @@ static inline struct v4l2_subdev *ctrl_to_sd(struct v4l2_ctrl *ctrl)
  * HW access : Big endian reg addresses and 8b, 16b or 32b little endian values
  */
 
-static int vd56g3_read(struct vd56g3 *sensor, u32 reg)
+static int vd56g3_read(struct vd56g3 *sensor, u32 reg, u32 *val, int *err)
 {
 	struct i2c_client *client = sensor->i2c_client;
 	unsigned int len = (reg >> VD56G3_REG_SIZE_SHIFT) & 7;
 	u8 buf[4];
 	int ret;
+
+	if (err && *err)
+		return *err;
 
 	reg = reg & VD56G3_REG_ADDR_MASK;
 
@@ -508,22 +511,32 @@ static int vd56g3_read(struct vd56g3 *sensor, u32 reg)
 	if (ret) {
 		dev_err(&client->dev, "%s: Error reading reg 0x%4x: %d\n",
 			__func__, reg, ret);
-		return ret;
+		goto out;
 	}
 
 	switch (len) {
 	case 1:
-		return buf[0];
+		*val = buf[0];
+		break;
 	case 2:
-		return get_unaligned_le16(buf);
+		*val = get_unaligned_le16(buf);
+		break;
 	case 4:
-		return get_unaligned_le32(buf);
+		*val = get_unaligned_le32(buf);
+		break;
 	default:
 		dev_err(&client->dev,
 			"%s: Error invalid reg-width %u for reg 0x%04x\n",
 			__func__, len, reg);
-		return -EINVAL;
+		ret = -EINVAL;
+		break;
 	}
+
+out:
+	if (ret && err)
+		*err = ret;
+
+	return ret;
 }
 
 static int vd56g3_write(struct vd56g3 *sensor, u32 reg, u32 val, int *err)
@@ -671,15 +684,7 @@ static u8 vd56g3_get_datatype(__u32 code)
 
 static int vd56g3_get_temp_stream_enable(struct vd56g3 *sensor, int *temp)
 {
-	int temperature;
-
-	temperature = vd56g3_read(sensor, VD56G3_REG_TEMPERATURE);
-	if (temperature < 0)
-		return temperature;
-
-	*temp = temperature;
-
-	return 0;
+	return vd56g3_read(sensor, VD56G3_REG_TEMPERATURE, temp, NULL);
 }
 
 static int vd56g3_get_temp_stream_disable(struct vd56g3 *sensor, int *temp)
@@ -712,36 +717,30 @@ static int vd56g3_get_expo_cluster(struct vd56g3 *sensor, bool force_cur_val)
 	int exposure;
 	int again;
 	int dgain;
+	int ret = 0;
 
 	/* When 'force_cur_val' is enabled, save the ctrl value in 'cur.val'
 	 * instead of the normal 'val', this is used during poweroff to cache
 	 * volatile ctrls and enable coldstart.
 	 */
-	exposure = vd56g3_read(sensor, VD56G3_REG_APPLIED_COARSE_EXPOSURE);
-	if (exposure < 0)
-		return exposure;
-	if (force_cur_val)
+	vd56g3_read(sensor, VD56G3_REG_APPLIED_COARSE_EXPOSURE, &exposure,
+		    &ret);
+	vd56g3_read(sensor, VD56G3_REG_APPLIED_ANALOG_GAIN, &again, &ret);
+	vd56g3_read(sensor, VD56G3_REG_APPLIED_DIGITAL_GAIN, &dgain, &ret);
+	if (ret)
+		return ret;
+
+	if (force_cur_val) {
 		sensor->expo_ctrl->cur.val = exposure;
-	else
-		sensor->expo_ctrl->val = exposure;
-
-	again = vd56g3_read(sensor, VD56G3_REG_APPLIED_ANALOG_GAIN);
-	if (again < 0)
-		return again;
-	if (force_cur_val)
 		sensor->again_ctrl->cur.val = again;
-	else
-		sensor->again_ctrl->val = again;
-
-	dgain = vd56g3_read(sensor, VD56G3_REG_APPLIED_DIGITAL_GAIN);
-	if (dgain < 0)
-		return dgain;
-	if (force_cur_val)
 		sensor->dgain_ctrl->cur.val = dgain;
-	else
+	} else {
+		sensor->expo_ctrl->val = exposure;
+		sensor->again_ctrl->val = again;
 		sensor->dgain_ctrl->val = dgain;
+	}
 
-	return 0;
+	return ret;
 }
 
 static int vd56g3_update_patgen(struct vd56g3 *sensor, u32 patgen_index)
@@ -1782,7 +1781,7 @@ static int vd56g3_patch(struct vd56g3 *sensor)
 	u8 patch_major;
 	u8 patch_minor;
 	int cur_patch_rev;
-	int ret;
+	int ret = 0;
 
 	patch_major = patch[3];
 	patch_minor = patch[2];
@@ -1800,9 +1799,10 @@ static int vd56g3_patch(struct vd56g3 *sensor)
 	if (ret)
 		return ret;
 
-	cur_patch_rev = vd56g3_read(sensor, VD56G3_REG_FWPATCH_REVISION);
-	if (cur_patch_rev < 0)
-		return cur_patch_rev;
+	ret = vd56g3_read(sensor, VD56G3_REG_FWPATCH_REVISION, &cur_patch_rev,
+			  NULL);
+	if (ret)
+		return ret;
 
 	if (cur_patch_rev != (patch_major << 8) + patch_minor) {
 		dev_err(&client->dev,
@@ -1883,9 +1883,9 @@ static int vd56g3_vtpatch(struct vd56g3 *sensor)
 	if (ret)
 		return ret;
 
-	cur_vtpatch_rev = vd56g3_read(sensor, VD56G3_REG_VTPATCH_ID);
-	if (cur_vtpatch_rev < 0)
-		return cur_vtpatch_rev;
+	vd56g3_read(sensor, VD56G3_REG_VTPATCH_ID, &cur_vtpatch_rev, &ret);
+	if (ret)
+		return ret;
 
 	if (cur_vtpatch_rev != VT_REVISION) {
 		dev_err(&client->dev, "bad vtpatch version, expected %d got %d",
@@ -2283,6 +2283,7 @@ static int vd56g3_detect(struct vd56g3 *sensor)
 	int model_id = 0;
 	int device_revision = 0;
 	int optical_revision = 0;
+	int ret = 0;
 
 #if KERNEL_VERSION(4, 16, 0) > LINUX_VERSION_CODE
 	const struct of_device_id *dt_ids;
@@ -2294,18 +2295,18 @@ static int vd56g3_detect(struct vd56g3 *sensor)
 	model = (uintptr_t)device_get_match_data(dev);
 #endif
 
-	model_id = vd56g3_read(sensor, VD56G3_REG_MODEL_ID);
-	if (model_id < 0)
-		return model_id;
+	ret = vd56g3_read(sensor, VD56G3_REG_MODEL_ID, &model_id, NULL);
+	if (ret)
+		return ret;
 
 	if (model_id != VD56G3_MODEL_ID) {
 		dev_warn(&client->dev, "Unsupported sensor id %x", model_id);
 		return -ENODEV;
 	}
 
-	device_revision = vd56g3_read(sensor, VD56G3_REG_REVISION);
-	if (device_revision < 0)
-		return device_revision;
+	ret = vd56g3_read(sensor, VD56G3_REG_REVISION, &device_revision, NULL);
+	if (ret)
+		return ret;
 
 	if ((device_revision >> 8) == 0x20) {
 		sensor->is_fastboot = false;
@@ -2317,9 +2318,10 @@ static int vd56g3_detect(struct vd56g3 *sensor)
 		return -ENODEV;
 	}
 
-	optical_revision = vd56g3_read(sensor, VD56G3_REG_OPTICAL_REVISION);
-	if (optical_revision < 0)
-		return optical_revision;
+	ret = vd56g3_read(sensor, VD56G3_REG_OPTICAL_REVISION,
+			  &optical_revision, NULL);
+	if (ret)
+		return ret;
 
 	sensor->is_mono =
 		((optical_revision & 1) == VD56G3_OPTICAL_REVISION_MONO);
