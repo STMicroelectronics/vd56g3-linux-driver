@@ -25,6 +25,20 @@
 
 /* Backward compatibility */
 #include <linux/version.h>
+
+#if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
+/* Warning : CCI_REGxy_LE definitions doesn't fit exactly with v4l2-cci.h .
+ * In fact endianness is managed directly in vd56g3_read/write() functions.
+ */
+#define CCI_REG_ADDR_MASK		GENMASK(15, 0)
+#define CCI_REG_WIDTH_SHIFT		16
+#define CCI_REG8(x)			((1 << CCI_REG_WIDTH_SHIFT) | (x))
+#define CCI_REG16_LE(x)			((2 << CCI_REG_WIDTH_SHIFT) | (x))
+#define CCI_REG32_LE(x)			((4 << CCI_REG_WIDTH_SHIFT) | (x))
+#else
+#include <media/v4l2-cci.h>
+#endif
+
 #if KERNEL_VERSION(5, 18, 0) > LINUX_VERSION_CODE
 #define MIPI_CSI2_DT_RAW8	0x2a
 #define MIPI_CSI2_DT_RAW10	0x2b
@@ -79,94 +93,88 @@ int pm_runtime_get_if_in_use(struct device *dev)
 }
 #endif
 
-#define VD56G3_REG_SIZE_SHIFT		16
-#define VD56G3_REG_ADDR_MASK		0xffff
-#define VD56G3_REG_8BIT(n)		((1 << VD56G3_REG_SIZE_SHIFT) | (n))
-#define VD56G3_REG_16BIT(n)		((2 << VD56G3_REG_SIZE_SHIFT) | (n))
-#define VD56G3_REG_32BIT(n)		((4 << VD56G3_REG_SIZE_SHIFT) | (n))
-
 /* Register Map */
-#define VD56G3_REG_MODEL_ID				VD56G3_REG_16BIT(0x0000)
+#define VD56G3_REG_MODEL_ID				CCI_REG16_LE(0x0000)
 #define VD56G3_MODEL_ID					0x5603
-#define VD56G3_REG_REVISION				VD56G3_REG_16BIT(0x0002)
-#define VD56G3_REG_OPTICAL_REVISION			VD56G3_REG_8BIT(0x001a)
+#define VD56G3_REG_REVISION				CCI_REG16_LE(0x0002)
+#define VD56G3_REG_OPTICAL_REVISION			CCI_REG8(0x001a)
 #define VD56G3_OPTICAL_REVISION_MONO			0
 #define VD56G3_OPTICAL_REVISION_BAYER			1
-#define VD56G3_REG_FWPATCH_REVISION			VD56G3_REG_16BIT(0x001e)
-#define VD56G3_REG_VTPATCH_ID				VD56G3_REG_8BIT(0x0020)
-#define VD56G3_REG_SYSTEM_FSM				VD56G3_REG_8BIT(0x0028)
+#define VD56G3_REG_FWPATCH_REVISION			CCI_REG16_LE(0x001e)
+#define VD56G3_REG_VTPATCH_ID				CCI_REG8(0x0020)
+#define VD56G3_REG_SYSTEM_FSM				CCI_REG8(0x0028)
 #define VD56G3_SYSTEM_FSM_READY_TO_BOOT			0x01
 #define VD56G3_SYSTEM_FSM_SW_STBY			0x02
 #define VD56G3_SYSTEM_FSM_STREAMING			0x03
-#define VD56G3_REG_TEMPERATURE				VD56G3_REG_16BIT(0x004c)
-#define VD56G3_REG_APPLIED_COARSE_EXPOSURE		VD56G3_REG_16BIT(0x0064)
-#define VD56G3_REG_APPLIED_ANALOG_GAIN			VD56G3_REG_8BIT(0x0068)
-#define VD56G3_REG_APPLIED_DIGITAL_GAIN			VD56G3_REG_16BIT(0x006A)
-#define VD56G3_REG_BOOT					VD56G3_REG_8BIT(0x0200)
+#define VD56G3_REG_TEMPERATURE				CCI_REG16_LE(0x004c)
+#define VD56G3_REG_APPLIED_COARSE_EXPOSURE		CCI_REG16_LE(0x0064)
+#define VD56G3_REG_APPLIED_ANALOG_GAIN			CCI_REG8(0x0068)
+#define VD56G3_REG_APPLIED_DIGITAL_GAIN			CCI_REG16_LE(0x006A)
+#define VD56G3_REG_BOOT					CCI_REG8(0x0200)
 #define VD56G3_CMD_ACK					0
 #define VD56G3_CMD_BOOT					1
 #define VD56G3_CMD_PATCH_SETUP				2
-#define VD56G3_REG_STBY					VD56G3_REG_8BIT(0x0201)
+#define VD56G3_REG_STBY					CCI_REG8(0x0201)
 #define VD56G3_CMD_START_STREAM				1
 #define VD56G3_CMD_THSENS_READ				4
-#define VD56G3_REG_STREAMING				VD56G3_REG_8BIT(0x0202)
+#define VD56G3_REG_STREAMING				CCI_REG8(0x0202)
 #define VD56G3_CMD_STOP_STREAM				1
-#define VD56G3_REG_VTPATCHING				VD56G3_REG_8BIT(0x0203)
+#define VD56G3_REG_VTPATCHING				CCI_REG8(0x0203)
 #define VD56G3_CMD_START_VTRAM_UPDATE			1
 #define VD56G3_CMD_END_VTRAM_UPDATE			2
-#define VD56G3_REG_EXT_CLOCK				VD56G3_REG_32BIT(0x0220)
-#define VD56G3_REG_CLK_PLL_PREDIV			VD56G3_REG_8BIT(0x0224)
-#define VD56G3_REG_CLK_SYS_PLL_MULT			VD56G3_REG_8BIT(0x0226)
-#define VD56G3_REG_ORIENTATION				VD56G3_REG_8BIT(0x0302)
-#define VD56G3_REG_VT_CTRL				VD56G3_REG_8BIT(0x0309)
-#define VD56G3_REG_FORMAT_CTRL				VD56G3_REG_8BIT(0x030a)
-#define VD56G3_REG_OIF_CTRL				VD56G3_REG_16BIT(0x030c)
-#define VD56G3_REG_OIF_IMG_CTRL				VD56G3_REG_8BIT(0x030f)
-#define VD56G3_REG_OIF_CSI_BITRATE			VD56G3_REG_16BIT(0x0312)
-#define VD56G3_REG_DUSTER_CTRL				VD56G3_REG_8BIT(0x0318)
+#define VD56G3_REG_EXT_CLOCK				CCI_REG32_LE(0x0220)
+#define VD56G3_REG_CLK_PLL_PREDIV			CCI_REG8(0x0224)
+#define VD56G3_REG_CLK_SYS_PLL_MULT			CCI_REG8(0x0226)
+#define VD56G3_REG_ORIENTATION				CCI_REG8(0x0302)
+#define VD56G3_REG_VT_CTRL				CCI_REG8(0x0309)
+#define VD56G3_REG_FORMAT_CTRL				CCI_REG8(0x030a)
+#define VD56G3_REG_OIF_CTRL				CCI_REG16_LE(0x030c)
+#define VD56G3_REG_OIF_IMG_CTRL				CCI_REG8(0x030f)
+#define VD56G3_REG_OIF_CSI_BITRATE			CCI_REG16_LE(0x0312)
+#define VD56G3_REG_DUSTER_CTRL				CCI_REG8(0x0318)
 #define VD56G3_DUSTER_DISABLE				0
 #define VD56G3_DUSTER_ENABLE_DEF_MODULES		0x13
-#define VD56G3_REG_ISL_ENABLE				VD56G3_REG_8BIT(0x0333)
-#define VD56G3_REG_DARKCAL_CTRL				VD56G3_REG_8BIT(0x0340)
+#define VD56G3_REG_ISL_ENABLE				CCI_REG8(0x0333)
+#define VD56G3_REG_DARKCAL_CTRL				CCI_REG8(0x0340)
 #define VD56G3_DARKCAL_ENABLE				1
 #define VD56G3_DARKCAL_DISABLE_DARKAVG			2
-#define VD56G3_REG_PATGEN_CTRL				VD56G3_REG_16BIT(0x0400)
-#define VD56G3_REG_DARKCAL_PEDESTAL			VD56G3_REG_8BIT(0x0415)
-#define VD56G3_REG_AE_COLDSTART_COARSE_EXPOSURE		VD56G3_REG_16BIT(0x042A)
-#define VD56G3_REG_AE_COLDSTART_ANALOG_GAIN		VD56G3_REG_8BIT(0x042C)
-#define VD56G3_REG_AE_COLDSTART_DIGITAL_GAIN		VD56G3_REG_16BIT(0x042E)
-#define VD56G3_REG_AE_COMPILER_CONTROL			VD56G3_REG_8BIT(0x0430)
-#define VD56G3_REG_AE_ROI_START_H			VD56G3_REG_16BIT(0x0432)
-#define VD56G3_REG_AE_ROI_START_V			VD56G3_REG_16BIT(0x0434)
-#define VD56G3_REG_AE_ROI_END_H				VD56G3_REG_16BIT(0x0436)
-#define VD56G3_REG_AE_ROI_END_V				VD56G3_REG_16BIT(0x0438)
-#define VD56G3_REG_AE_COMPENSATION			VD56G3_REG_16BIT(0x043A)
-#define VD56G3_REG_AE_TARGET_PERCENTAGE			VD56G3_REG_16BIT(0x043C)
-#define VD56G3_REG_AE_STEP_PROPORTION			VD56G3_REG_16BIT(0x043E)
-#define VD56G3_REG_AE_LEAK_PROPORTION			VD56G3_REG_16BIT(0x0440)
-#define VD56G3_REG_EXP_MODE				VD56G3_REG_8BIT(0x044c)
+#define VD56G3_REG_PATGEN_CTRL				CCI_REG16_LE(0x0400)
+#define VD56G3_REG_DARKCAL_PEDESTAL			CCI_REG8(0x0415)
+#define VD56G3_REG_AE_COLDSTART_COARSE_EXPOSURE		CCI_REG16_LE(0x042A)
+#define VD56G3_REG_AE_COLDSTART_ANALOG_GAIN		CCI_REG8(0x042C)
+#define VD56G3_REG_AE_COLDSTART_DIGITAL_GAIN		CCI_REG16_LE(0x042E)
+#define VD56G3_REG_AE_COMPILER_CONTROL			CCI_REG8(0x0430)
+#define VD56G3_REG_AE_ROI_START_H			CCI_REG16_LE(0x0432)
+#define VD56G3_REG_AE_ROI_START_V			CCI_REG16_LE(0x0434)
+#define VD56G3_REG_AE_ROI_END_H				CCI_REG16_LE(0x0436)
+#define VD56G3_REG_AE_ROI_END_V				CCI_REG16_LE(0x0438)
+#define VD56G3_REG_AE_COMPENSATION			CCI_REG16_LE(0x043A)
+#define VD56G3_REG_AE_TARGET_PERCENTAGE			CCI_REG16_LE(0x043C)
+#define VD56G3_REG_AE_STEP_PROPORTION			CCI_REG16_LE(0x043E)
+#define VD56G3_REG_AE_LEAK_PROPORTION			CCI_REG16_LE(0x0440)
+#define VD56G3_REG_EXP_MODE				CCI_REG8(0x044c)
 #define VD56G3_EXP_MODE_AUTO				0
 #define VD56G3_EXP_MODE_FREEZE				1
 #define VD56G3_EXP_MODE_MANUAL				2
-#define VD56G3_REG_MANUAL_ANALOG_GAIN			VD56G3_REG_8BIT(0x044d)
-#define VD56G3_REG_MANUAL_COARSE_EXPOSURE		VD56G3_REG_16BIT(0x044e)
-#define VD56G3_REG_MANUAL_DIGITAL_GAIN_CH0		VD56G3_REG_16BIT(0x0450)
-#define VD56G3_REG_MANUAL_DIGITAL_GAIN_CH1		VD56G3_REG_16BIT(0x0452)
-#define VD56G3_REG_MANUAL_DIGITAL_GAIN_CH2		VD56G3_REG_16BIT(0x0454)
-#define VD56G3_REG_MANUAL_DIGITAL_GAIN_CH3		VD56G3_REG_16BIT(0x0456)
-#define VD56G3_REG_FRAME_LENGTH				VD56G3_REG_16BIT(0x0458)
-#define VD56G3_REG_Y_START				VD56G3_REG_16BIT(0x045a)
-#define VD56G3_REG_Y_END				VD56G3_REG_16BIT(0x045c)
-#define VD56G3_REG_OUT_ROI_X_START			VD56G3_REG_16BIT(0x045e)
-#define VD56G3_REG_OUT_ROI_X_END			VD56G3_REG_16BIT(0x0460)
-#define VD56G3_REG_OUT_ROI_Y_START			VD56G3_REG_16BIT(0x0462)
-#define VD56G3_REG_OUT_ROI_Y_END			VD56G3_REG_16BIT(0x0464)
-#define VD56G3_REG_GPIO_0_CTRL				VD56G3_REG_8BIT(0x0467)
+#define VD56G3_REG_MANUAL_ANALOG_GAIN			CCI_REG8(0x044d)
+#define VD56G3_REG_MANUAL_COARSE_EXPOSURE		CCI_REG16_LE(0x044e)
+#define VD56G3_REG_MANUAL_DIGITAL_GAIN_CH0		CCI_REG16_LE(0x0450)
+#define VD56G3_REG_MANUAL_DIGITAL_GAIN_CH1		CCI_REG16_LE(0x0452)
+#define VD56G3_REG_MANUAL_DIGITAL_GAIN_CH2		CCI_REG16_LE(0x0454)
+#define VD56G3_REG_MANUAL_DIGITAL_GAIN_CH3		CCI_REG16_LE(0x0456)
+#define VD56G3_REG_FRAME_LENGTH				CCI_REG16_LE(0x0458)
+#define VD56G3_REG_Y_START				CCI_REG16_LE(0x045a)
+#define VD56G3_REG_Y_END				CCI_REG16_LE(0x045c)
+#define VD56G3_REG_OUT_ROI_X_START			CCI_REG16_LE(0x045e)
+#define VD56G3_REG_OUT_ROI_X_END			CCI_REG16_LE(0x0460)
+#define VD56G3_REG_OUT_ROI_Y_START			CCI_REG16_LE(0x0462)
+#define VD56G3_REG_OUT_ROI_Y_END			CCI_REG16_LE(0x0464)
+#define VD56G3_REG_GPIO_0_CTRL				CCI_REG8(0x0467)
 #define VD56G3_GPIOX_FSYNC_OUT				0x00
 #define VD56G3_GPIOX_GPIO_IN				0x01
 #define VD56G3_GPIOX_STROBE_MODE			0x02
 #define VD56G3_GPIOX_VT_SLAVE_MODE			0x0a
-#define VD56G3_REG_READOUT_CTRL				VD56G3_REG_8BIT(0x047e)
+#define VD56G3_REG_READOUT_CTRL				CCI_REG8(0x047e)
 
 /*
  * The VD56G3 pixel array is organized as follows:
@@ -416,12 +424,14 @@ static const unsigned int vd56g3_mbus_codes[2][5] = {
 	},
 };
 
+#if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
 /* Big endian register addresses and 8b, 16b or 32b little endian values .*/
 static const struct regmap_config vd56g3_regmap_config = {
 	.reg_bits = 16,
 	.val_bits = 8,
 	.reg_format_endian = REGMAP_ENDIAN_BIG,
 };
+#endif
 
 enum vd56g3_pad_types {
 	IMAGE_PAD,
@@ -495,17 +505,18 @@ static inline struct v4l2_subdev *ctrl_to_sd(struct v4l2_ctrl *ctrl)
  * HW access : Big endian reg addresses and 8b, 16b or 32b little endian values
  */
 
+#if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
 static int vd56g3_read(struct vd56g3 *sensor, u32 reg, u32 *val, int *err)
 {
 	struct i2c_client *client = sensor->i2c_client;
-	unsigned int len = (reg >> VD56G3_REG_SIZE_SHIFT) & 7;
+	unsigned int len = (reg >> CCI_REG_WIDTH_SHIFT) & 7;
 	u8 buf[4];
 	int ret;
 
 	if (err && *err)
 		return *err;
 
-	reg = reg & VD56G3_REG_ADDR_MASK;
+	reg = reg & CCI_REG_ADDR_MASK;
 
 	ret = regmap_bulk_read(sensor->regmap, reg, buf, len);
 	if (ret) {
@@ -542,14 +553,14 @@ out:
 static int vd56g3_write(struct vd56g3 *sensor, u32 reg, u32 val, int *err)
 {
 	struct i2c_client *client = sensor->i2c_client;
-	unsigned int len = (reg >> VD56G3_REG_SIZE_SHIFT) & 7;
+	unsigned int len = (reg >> CCI_REG_WIDTH_SHIFT) & 7;
 	u8 buf[4];
 	int ret;
 
 	if (err && *err)
 		return *err;
 
-	reg = reg & VD56G3_REG_ADDR_MASK;
+	reg = reg & CCI_REG_ADDR_MASK;
 	switch (len) {
 	case 1:
 		buf[0] = val;
@@ -579,6 +590,13 @@ out:
 
 	return ret;
 }
+#else
+#define vd56g3_read(sensor, reg, val, err) \
+	cci_read((sensor)->regmap, reg, (u64 *)val, err)
+
+#define vd56g3_write(sensor, reg, val, err) \
+	cci_write((sensor)->regmap, reg, (u64)val, err)
+#endif
 
 static int vd56g3_write_array(struct vd56g3 *sensor, u32 reg, unsigned int len,
 			      const u8 *array, int *err)
@@ -619,8 +637,8 @@ static int vd56g3_poll_reg(struct vd56g3 *sensor, u32 reg, u8 poll_val,
 	if (err && *err)
 		return *err;
 
-	ret = regmap_read_poll_timeout(sensor->regmap,
-				       reg & VD56G3_REG_ADDR_MASK, val,
+	reg = reg & CCI_REG_ADDR_MASK;
+	ret = regmap_read_poll_timeout(sensor->regmap, reg, val,
 				       (val == poll_val), 2000,
 				       500 * USEC_PER_MSEC);
 
@@ -2391,7 +2409,11 @@ static int vd56g3_probe(struct i2c_client *client)
 		return dev_err_probe(dev, PTR_ERR(sensor->reset_gpio),
 				     "Failed to get reset gpio.");
 
+#if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
 	sensor->regmap = devm_regmap_init_i2c(client, &vd56g3_regmap_config);
+#else
+	sensor->regmap = devm_cci_regmap_init_i2c(client, 16);
+#endif
 	if (IS_ERR(sensor->regmap))
 		return dev_err_probe(dev, PTR_ERR(sensor->regmap),
 				     "Failed to init regmap.");
