@@ -581,11 +581,14 @@ out:
 }
 
 static int vd56g3_write_array(struct vd56g3 *sensor, u32 reg, unsigned int len,
-			      const u8 *array)
+			      const u8 *array, int *err)
 {
 	unsigned int chunk_sz = 1024;
 	unsigned int sz;
 	int ret;
+
+	if (err && *err)
+		return *err;
 
 	/* This loop isn't necessary but in certains conditions (platforms, cpu
 	 * load, etc.) it has been observed that the bulk write could timeout.
@@ -594,28 +597,42 @@ static int vd56g3_write_array(struct vd56g3 *sensor, u32 reg, unsigned int len,
 		sz = min(len, chunk_sz);
 		ret = regmap_bulk_write(sensor->regmap, reg, array, sz);
 		if (ret < 0)
-			return ret;
+			goto out;
 		len -= sz;
 		reg += sz;
 		array += sz;
 	}
 
+out:
+	if (ret && err)
+		*err = ret;
+
 	return ret;
 }
 
-static int vd56g3_poll_reg(struct vd56g3 *sensor, u32 reg, u8 poll_val)
+static int vd56g3_poll_reg(struct vd56g3 *sensor, u32 reg, u8 poll_val,
+			   int *err)
 {
-	unsigned int val;
+	unsigned int val = 0;
+	int ret;
 
-	return regmap_read_poll_timeout(sensor->regmap,
-					reg & VD56G3_REG_ADDR_MASK, val,
-					(val == poll_val), 2000,
-					500 * USEC_PER_MSEC);
+	if (err && *err)
+		return *err;
+
+	ret = regmap_read_poll_timeout(sensor->regmap,
+				       reg & VD56G3_REG_ADDR_MASK, val,
+				       (val == poll_val), 2000,
+				       500 * USEC_PER_MSEC);
+
+	if (ret && err)
+		*err = ret;
+
+	return ret;
 }
 
-static int vd56g3_wait_state(struct vd56g3 *sensor, int state)
+static int vd56g3_wait_state(struct vd56g3 *sensor, int state, int *err)
 {
-	return vd56g3_poll_reg(sensor, VD56G3_REG_SYSTEM_FSM, state);
+	return vd56g3_poll_reg(sensor, VD56G3_REG_SYSTEM_FSM, state, err);
 }
 
 /* ----------------------------------------------------------------------------
@@ -689,14 +706,11 @@ static int vd56g3_get_temp_stream_enable(struct vd56g3 *sensor, int *temp)
 
 static int vd56g3_get_temp_stream_disable(struct vd56g3 *sensor, int *temp)
 {
-	int ret;
+	int ret = 0;
 
 	/* request temperature read */
-	ret = vd56g3_write(sensor, VD56G3_REG_STBY, VD56G3_CMD_THSENS_READ,
-			   NULL);
-	if (ret)
-		return ret;
-	ret = vd56g3_poll_reg(sensor, VD56G3_REG_STBY, VD56G3_CMD_ACK);
+	vd56g3_write(sensor, VD56G3_REG_STBY, VD56G3_CMD_THSENS_READ, &ret);
+	vd56g3_poll_reg(sensor, VD56G3_REG_STBY, VD56G3_CMD_ACK, &ret);
 	if (ret)
 		return ret;
 
@@ -1385,45 +1399,26 @@ static int vd56g3_stream_on(struct vd56g3 *sensor)
 		return ret;
 
 	/* start streaming */
-	ret = vd56g3_write(sensor, VD56G3_REG_STBY, VD56G3_CMD_START_STREAM,
-			   NULL);
-	if (ret)
-		return ret;
+	vd56g3_write(sensor, VD56G3_REG_STBY, VD56G3_CMD_START_STREAM, &ret);
+	vd56g3_poll_reg(sensor, VD56G3_REG_STBY, VD56G3_CMD_ACK, &ret);
+	vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_STREAMING, &ret);
 
-	ret = vd56g3_poll_reg(sensor, VD56G3_REG_STBY, VD56G3_CMD_ACK);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_STREAMING);
-	if (ret)
-		return ret;
-
-	return 0;
+	return ret;
 }
 
 static int vd56g3_stream_off(struct vd56g3 *sensor)
 {
-	int ret;
+	int ret = 0;
 
 	/* Retrieve Expo cluster to enable coldstart of AE*/
 	ret = vd56g3_get_expo_cluster(sensor, true);
-	if (ret)
-		return ret;
 
-	ret = vd56g3_write(sensor, VD56G3_REG_STREAMING, VD56G3_CMD_STOP_STREAM,
-			   NULL);
-	if (ret)
-		return ret;
+	vd56g3_write(sensor, VD56G3_REG_STREAMING, VD56G3_CMD_STOP_STREAM,
+		     &ret);
+	vd56g3_poll_reg(sensor, VD56G3_REG_STREAMING, VD56G3_CMD_ACK, &ret);
+	vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY, &ret);
 
-	ret = vd56g3_poll_reg(sensor, VD56G3_REG_STREAMING, VD56G3_CMD_ACK);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY);
-	if (ret)
-		return ret;
-
-	return 0;
+	return ret;
 }
 
 static int vd56g3_s_stream(struct v4l2_subdev *sd, int enable)
@@ -1786,21 +1781,10 @@ static int vd56g3_patch(struct vd56g3 *sensor)
 	patch_major = patch[3];
 	patch_minor = patch[2];
 
-	ret = vd56g3_write_array(sensor, 0x2000, patch_size, patch);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_write(sensor, VD56G3_REG_BOOT, VD56G3_CMD_PATCH_SETUP,
-			   NULL);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_poll_reg(sensor, VD56G3_REG_BOOT, VD56G3_CMD_ACK);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_read(sensor, VD56G3_REG_FWPATCH_REVISION, &cur_patch_rev,
-			  NULL);
+	vd56g3_write_array(sensor, 0x2000, patch_size, patch, &ret);
+	vd56g3_write(sensor, VD56G3_REG_BOOT, VD56G3_CMD_PATCH_SETUP, &ret);
+	vd56g3_poll_reg(sensor, VD56G3_REG_BOOT, VD56G3_CMD_ACK, &ret);
+	vd56g3_read(sensor, VD56G3_REG_FWPATCH_REVISION, &cur_patch_rev, &ret);
 	if (ret)
 		return ret;
 
@@ -1820,23 +1804,16 @@ static int vd56g3_patch(struct vd56g3 *sensor)
 static int vd56g3_boot(struct vd56g3 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
-	int ret;
+	int ret = 0;
 
-	ret = vd56g3_write(sensor, VD56G3_REG_BOOT, VD56G3_CMD_BOOT, NULL);
-	if (ret)
-		return ret;
+	vd56g3_write(sensor, VD56G3_REG_BOOT, VD56G3_CMD_BOOT, &ret);
+	vd56g3_poll_reg(sensor, VD56G3_REG_BOOT, VD56G3_CMD_ACK, &ret);
+	vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY, &ret);
 
-	ret = vd56g3_poll_reg(sensor, VD56G3_REG_BOOT, VD56G3_CMD_ACK);
-	if (ret)
-		return ret;
+	if (ret == 0)
+		dev_info(&client->dev, "sensor boot successfully");
 
-	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY);
-	if (ret)
-		return ret;
-
-	dev_info(&client->dev, "sensor boot successfully");
-
-	return 0;
+	return ret;
 }
 
 static int vd56g3_vtpatch(struct vd56g3 *sensor)
@@ -1847,42 +1824,23 @@ static int vd56g3_vtpatch(struct vd56g3 *sensor)
 	int cur_vtpatch_rev;
 	int ret = 0;
 
-	ret = vd56g3_write(sensor, VD56G3_REG_VTPATCHING,
-			   VD56G3_CMD_START_VTRAM_UPDATE, NULL);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_poll_reg(sensor, VD56G3_REG_VTPATCHING, VD56G3_CMD_ACK);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY);
-	if (ret)
-		return ret;
+	vd56g3_write(sensor, VD56G3_REG_VTPATCHING,
+		     VD56G3_CMD_START_VTRAM_UPDATE, &ret);
+	vd56g3_poll_reg(sensor, VD56G3_REG_VTPATCHING, VD56G3_CMD_ACK, &ret);
+	vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY, &ret);
 
 	for (i = 0; i < vtpatch_area_nb; i++) {
-		ret = vd56g3_write_array(sensor, vtpatch_desc[i].offset,
-					 vtpatch_desc[i].size,
-					 vtpatch + vtpatch_offset);
-		if (ret)
-			return ret;
+		vd56g3_write_array(sensor, vtpatch_desc[i].offset,
+				   vtpatch_desc[i].size,
+				   vtpatch + vtpatch_offset, &ret);
 
 		vtpatch_offset += vtpatch_desc[i].size;
 	}
 
 	vd56g3_write(sensor, VD56G3_REG_VTPATCHING, VD56G3_CMD_END_VTRAM_UPDATE,
 		     &ret);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_poll_reg(sensor, VD56G3_REG_VTPATCHING, VD56G3_CMD_ACK);
-	if (ret)
-		return ret;
-
-	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY);
-	if (ret)
-		return ret;
-
+	vd56g3_poll_reg(sensor, VD56G3_REG_VTPATCHING, VD56G3_CMD_ACK, &ret);
+	vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY, &ret);
 	vd56g3_read(sensor, VD56G3_REG_VTPATCH_ID, &cur_vtpatch_rev, &ret);
 	if (ret)
 		return ret;
@@ -1919,7 +1877,7 @@ static int vd56g3_power_on(struct vd56g3 *sensor)
 	}
 
 	gpiod_set_value_cansleep(sensor->reset_gpio, 0);
-	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_READY_TO_BOOT);
+	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_READY_TO_BOOT, NULL);
 	if (ret) {
 		dev_err(&client->dev, "Sensor reset failed %d\n", ret);
 		goto disable_clock;
@@ -2295,7 +2253,7 @@ static int vd56g3_detect(struct vd56g3 *sensor)
 	model = (uintptr_t)device_get_match_data(dev);
 #endif
 
-	ret = vd56g3_read(sensor, VD56G3_REG_MODEL_ID, &model_id, NULL);
+	vd56g3_read(sensor, VD56G3_REG_MODEL_ID, &model_id, &ret);
 	if (ret)
 		return ret;
 
@@ -2304,7 +2262,7 @@ static int vd56g3_detect(struct vd56g3 *sensor)
 		return -ENODEV;
 	}
 
-	ret = vd56g3_read(sensor, VD56G3_REG_REVISION, &device_revision, NULL);
+	vd56g3_read(sensor, VD56G3_REG_REVISION, &device_revision, &ret);
 	if (ret)
 		return ret;
 
@@ -2318,8 +2276,8 @@ static int vd56g3_detect(struct vd56g3 *sensor)
 		return -ENODEV;
 	}
 
-	ret = vd56g3_read(sensor, VD56G3_REG_OPTICAL_REVISION,
-			  &optical_revision, NULL);
+	vd56g3_read(sensor, VD56G3_REG_OPTICAL_REVISION, &optical_revision,
+		    &ret);
 	if (ret)
 		return ret;
 
