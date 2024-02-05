@@ -570,7 +570,24 @@ out:
 static int vd56g3_write_array(struct vd56g3 *sensor, u32 reg, unsigned int len,
 			      const u8 *array)
 {
-	return regmap_bulk_write(sensor->regmap, reg, array, len);
+	unsigned int chunk_sz = 1024;
+	unsigned int sz;
+	int ret;
+
+	/* This loop isn't necessary but in certains conditions (platforms, cpu
+	 * load, etc.) it has been observed that the bulk write could timeout.
+	 */
+	while (len) {
+		sz = min(len, chunk_sz);
+		ret = regmap_bulk_write(sensor->regmap, reg, array, sz);
+		if (ret < 0)
+			return ret;
+		len -= sz;
+		reg += sz;
+		array += sz;
+	}
+
+	return ret;
 }
 
 static int vd56g3_poll_reg(struct vd56g3 *sensor, u32 reg, u8 poll_val)
