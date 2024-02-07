@@ -1629,6 +1629,7 @@ static int vd56g3_get_pad_fmt(struct v4l2_subdev *sd,
 	return 0;
 }
 
+#if KERNEL_VERSION(4, 17, 0) > LINUX_VERSION_CODE
 static const struct vd56g3_mode *
 vd56g3_find_nearest_size(struct v4l2_mbus_framefmt *fmt)
 {
@@ -1646,6 +1647,7 @@ vd56g3_find_nearest_size(struct v4l2_mbus_framefmt *fmt)
 
 	return mode;
 }
+#endif
 
 static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
@@ -1673,7 +1675,14 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 	mutex_lock(&sensor->lock);
 
 	/* find best format */
+#if KERNEL_VERSION(4, 17, 0) > LINUX_VERSION_CODE
 	new_mode = vd56g3_find_nearest_size(&sd_fmt->format);
+#else
+	new_mode = v4l2_find_nearest_size(vd56g3_supported_modes,
+					  ARRAY_SIZE(vd56g3_supported_modes),
+					  width, height, sd_fmt->format.width,
+					  sd_fmt->format.height);
+#endif
 	vd56g3_update_img_pad_format(sensor, new_mode, sd_fmt->format.code,
 				     &sd_fmt->format);
 
