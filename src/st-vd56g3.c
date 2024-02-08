@@ -1579,8 +1579,8 @@ static void vd56g3_update_img_pad_format(struct vd56g3 *sensor,
 	mbus_fmt->colorspace = V4L2_COLORSPACE_RAW;
 	mbus_fmt->field = V4L2_FIELD_NONE;
 	mbus_fmt->ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
-	mbus_fmt->quantization = V4L2_QUANTIZATION_DEFAULT;
-	mbus_fmt->xfer_func = V4L2_XFER_FUNC_DEFAULT;
+	mbus_fmt->quantization = V4L2_QUANTIZATION_FULL_RANGE;
+	mbus_fmt->xfer_func = V4L2_XFER_FUNC_NONE;
 }
 
 static int vd56g3_get_pad_fmt(struct v4l2_subdev *sd,
