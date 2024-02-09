@@ -175,6 +175,8 @@ int pm_runtime_get_if_in_use(struct device *dev)
 #define VD56G3_GPIOX_STROBE_MODE			0x02
 #define VD56G3_GPIOX_VT_SLAVE_MODE			0x0a
 #define VD56G3_REG_READOUT_CTRL				CCI_REG8(0x047e)
+#define READOUT_NORMAL					0x00
+#define READOUT_DIGITAL_BINNING_X2			0x01
 
 /*
  * The VD56G3 pixel array is organized as follows:
@@ -261,16 +263,9 @@ enum vd56g3_models {
 	VD56G3_MODEL_VD66GY, // Bayer variant
 };
 
-enum vd56g3_bin_mode {
-	VG56G3_BIN_MODE_NORMAL,
-	VG56G3_BIN_MODE_DIGITAL_X2,
-	VG56G3_BIN_MODE_DIGITAL_X4,
-};
-
 struct vd56g3_mode {
 	u32 width;
 	u32 height;
-	enum vd56g3_bin_mode bin_mode;
 	struct v4l2_rect crop;
 };
 
@@ -279,19 +274,19 @@ struct vd56g3_mode {
  *
  * The vd56g3 driver supports 9 modes described below :
  *
- * ======= ======== ============ ====================
- *  Width   Height   Binning	  Comment
- * ======= ======== ============ ====================
- *   1124     1364   No Binning   Native resolution
- *   1120     1360   No Binning   Default resolution
- *   1024     1280   No Binning
- *   1024      768   No Binning
- *    768     1024   No Binning
- *    720     1280   No Binning
- *    640      480   No Binning
- *    480      640   Binning x2
- *    320      240   Binning x2
- * ======= ======== ============ ====================
+ * ======= ======== ====================
+ *  Width   Height   Comment
+ * ======= ======== ====================
+ *   1124     1364   Native resolution
+ *   1120     1360   Default resolution
+ *   1024     1280
+ *   1024      768
+ *    768     1024
+ *    720     1280
+ *    640      480
+ *    480      640   Enable Binning x2
+ *    320      240   Enable Binning x2
+ * ======= ======== ====================
  *
  * Each mode defaults to 60FPS. In addition, the framerate could be adjusted in
  * a continuous manner (making use of the ``V4L2_CID_VBLANK`` control).
@@ -305,7 +300,6 @@ static const struct vd56g3_mode vd56g3_supported_modes[] = {
 	{
 		.width = VD56G3_NATIVE_WIDTH,
 		.height = VD56G3_NATIVE_HEIGHT,
-		.bin_mode = VG56G3_BIN_MODE_NORMAL,
 		.crop = {
 			.left = 0,
 			.top = 0,
@@ -316,7 +310,6 @@ static const struct vd56g3_mode vd56g3_supported_modes[] = {
 	{
 		.width = VD56G3_DEFAULT_WIDTH,
 		.height = VD56G3_DEFAULT_HEIGHT,
-		.bin_mode = VG56G3_BIN_MODE_NORMAL,
 		.crop = {
 			.left = 2,
 			.top = 2,
@@ -327,7 +320,6 @@ static const struct vd56g3_mode vd56g3_supported_modes[] = {
 	{
 		.width = 1024,
 		.height = 1280,
-		.bin_mode = VG56G3_BIN_MODE_NORMAL,
 		.crop = {
 			.left = 50,
 			.top = 42,
@@ -338,7 +330,6 @@ static const struct vd56g3_mode vd56g3_supported_modes[] = {
 	{
 		.width = 1024,
 		.height = 768,
-		.bin_mode = VG56G3_BIN_MODE_NORMAL,
 		.crop = {
 			.left = 50,
 			.top = 298,
@@ -349,7 +340,6 @@ static const struct vd56g3_mode vd56g3_supported_modes[] = {
 	{
 		.width = 768,
 		.height = 1024,
-		.bin_mode = VG56G3_BIN_MODE_NORMAL,
 		.crop = {
 			.left = 178,
 			.top = 170,
@@ -360,7 +350,6 @@ static const struct vd56g3_mode vd56g3_supported_modes[] = {
 	{
 		.width = 720,
 		.height = 1280,
-		.bin_mode = VG56G3_BIN_MODE_NORMAL,
 		.crop = {
 			.left = 202,
 			.top = 42,
@@ -371,7 +360,6 @@ static const struct vd56g3_mode vd56g3_supported_modes[] = {
 	{
 		.width = 640,
 		.height = 480,
-		.bin_mode = VG56G3_BIN_MODE_NORMAL,
 		.crop = {
 			.left = 242,
 			.top = 442,
@@ -382,7 +370,6 @@ static const struct vd56g3_mode vd56g3_supported_modes[] = {
 	{
 		.width = 480,
 		.height = 640,
-		.bin_mode = VG56G3_BIN_MODE_DIGITAL_X2,
 		.crop = {
 			.left = 82,
 			.top = 42,
@@ -393,7 +380,6 @@ static const struct vd56g3_mode vd56g3_supported_modes[] = {
 	{
 		.width = 320,
 		.height = 240,
-		.bin_mode = VG56G3_BIN_MODE_DIGITAL_X2,
 		.crop = {
 			.left = 242,
 			.top = 442,
@@ -1365,6 +1351,8 @@ static int vd56g3_stream_on(struct vd56g3 *sensor)
 	unsigned int csi_mbps = ((sensor->nb_of_lane == 2) ?
 					 VD56G3_LINK_FREQ_DEF_2LANES :
 					 VD56G3_LINK_FREQ_DEF_1LANE) * 2 / MEGA;
+	unsigned int binning;
+
 	/* configure clocks */
 	vd56g3_write(sensor, VD56G3_REG_EXT_CLOCK, sensor->ext_clock, &ret);
 	vd56g3_write(sensor, VD56G3_REG_CLK_PLL_PREDIV, sensor->pll_prediv,
@@ -1381,9 +1369,19 @@ static int vd56g3_stream_on(struct vd56g3 *sensor)
 		     vd56g3_get_datatype(sensor->img_mbus_code), &ret);
 	vd56g3_write(sensor, VD56G3_REG_ISL_ENABLE, 0, &ret);
 
-	/* configure ROIs and bin mode */
-	vd56g3_write(sensor, VD56G3_REG_READOUT_CTRL,
-		     sensor->current_mode->bin_mode, &ret);
+	/* configure binning mode */
+	switch (crop->width / sensor->current_mode->width) {
+	case 1:
+	default:
+		binning = READOUT_NORMAL;
+		break;
+	case 2:
+		binning = READOUT_DIGITAL_BINNING_X2;
+		break;
+	}
+	vd56g3_write(sensor, VD56G3_REG_READOUT_CTRL, binning, &ret);
+
+	/* configure ROIs */
 	vd56g3_write(sensor, VD56G3_REG_Y_START, crop->top, &ret);
 	vd56g3_write(sensor, VD56G3_REG_Y_END, crop->top + crop->height - 1,
 		     &ret);
