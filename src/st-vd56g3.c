@@ -473,8 +473,8 @@ struct vd56g3 {
 	struct v4l2_ctrl *slave_ctrl;
 	struct v4l2_ctrl *led_ctrl;
 	bool streaming;
-	const struct vd56g3_mode *current_mode;
-	u32 img_mbus_code;
+	struct v4l2_mbus_framefmt active_fmt;
+	struct v4l2_rect active_crop;
 };
 
 static inline struct vd56g3 *to_vd56g3(struct v4l2_subdev *sd)
@@ -911,7 +911,7 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 	/* Update controls state, range, etc. whatever the state of the HW*/
 	switch (ctrl->id) {
 	case V4L2_CID_VBLANK:
-		frame_length = sensor->current_mode->crop.height + ctrl->val;
+		frame_length = sensor->active_crop.height + ctrl->val;
 		expo_max = frame_length - VD56G3_EXPOSURE_OFFSET;
 		__v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max, 1,
 					 VD56G3_EXPOSURE_DEFAULT);
@@ -1191,12 +1191,12 @@ static const struct v4l2_ctrl_config vd56g3_dgain_ctrl = {
 static void vd56g3_update_controls(struct vd56g3 *sensor)
 {
 	unsigned int hblank =
-		VD56G3_LINE_LENGTH_MIN - sensor->current_mode->crop.width;
+		VD56G3_LINE_LENGTH_MIN - sensor->active_crop.width;
 	unsigned int vblank_min = VD56G3_FRAME_LENGTH_OFFSET;
-	unsigned int vblank = VD56G3_FRAME_LENGTH_DEF_60FPS -
-			      sensor->current_mode->crop.height;
-	unsigned int vblank_max = 0xffff - sensor->current_mode->crop.height;
-	unsigned int frame_length = sensor->current_mode->crop.height + vblank;
+	unsigned int vblank =
+		VD56G3_FRAME_LENGTH_DEF_60FPS - sensor->active_crop.height;
+	unsigned int vblank_max = 0xffff - sensor->active_crop.height;
+	unsigned int frame_length = sensor->active_crop.height + vblank;
 	unsigned int expo_max = frame_length - VD56G3_EXPOSURE_OFFSET;
 
 	/* Update blanking and exposure (ranges + values) */
@@ -1346,7 +1346,7 @@ free_ctrls:
 
 static int vd56g3_stream_on(struct vd56g3 *sensor)
 {
-	const struct v4l2_rect *crop = &sensor->current_mode->crop;
+	const struct v4l2_rect *crop = &sensor->active_crop;
 	int ret = 0;
 	unsigned int csi_mbps = ((sensor->nb_of_lane == 2) ?
 					 VD56G3_LINK_FREQ_DEF_2LANES :
@@ -1362,15 +1362,15 @@ static int vd56g3_stream_on(struct vd56g3 *sensor)
 
 	/* configure output */
 	vd56g3_write(sensor, VD56G3_REG_FORMAT_CTRL,
-		     vd56g3_get_bpp(sensor->img_mbus_code), &ret);
+		     vd56g3_get_bpp(sensor->active_fmt.code), &ret);
 	vd56g3_write(sensor, VD56G3_REG_OIF_CTRL, sensor->oif_ctrl, &ret);
 	vd56g3_write(sensor, VD56G3_REG_OIF_CSI_BITRATE, csi_mbps, &ret);
 	vd56g3_write(sensor, VD56G3_REG_OIF_IMG_CTRL,
-		     vd56g3_get_datatype(sensor->img_mbus_code), &ret);
+		     vd56g3_get_datatype(sensor->active_fmt.code), &ret);
 	vd56g3_write(sensor, VD56G3_REG_ISL_ENABLE, 0, &ret);
 
 	/* configure binning mode */
-	switch (crop->width / sensor->current_mode->width) {
+	switch (crop->width / sensor->active_fmt.width) {
 	case 1:
 	default:
 		binning = READOUT_NORMAL;
@@ -1613,9 +1613,7 @@ static int vd56g3_get_pad_fmt(struct v4l2_subdev *sd,
 		pad_fmt->code = vd56g3_get_mbus_code(sensor, pad_fmt->code);
 		sd_fmt->format = *pad_fmt;
 	} else {
-		vd56g3_update_img_pad_format(sensor, sensor->current_mode,
-					     sensor->img_mbus_code,
-					     &sd_fmt->format);
+		sd_fmt->format = sensor->active_fmt;
 	}
 
 	mutex_unlock(&sensor->lock);
@@ -1693,12 +1691,13 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 		pad_fmt = v4l2_subdev_get_pad_format(sd, sd_state, sd_fmt->pad);
 #endif
 		*pad_fmt = sd_fmt->format;
-	} else if (sensor->current_mode != new_mode ||
-		   sensor->img_mbus_code != sd_fmt->format.code) {
+	} else if (sd_fmt->format.width != sensor->active_fmt.width ||
+		   sd_fmt->format.height != sensor->active_fmt.height ||
+		   sd_fmt->format.code != sensor->active_fmt.code) {
 		// This nested 'if' only avoid to reset ctrls while format
 		// hasn't changed (userspace pb, we shouldn't interfere ?)
-		sensor->current_mode = new_mode;
-		sensor->img_mbus_code = sd_fmt->format.code;
+		sensor->active_fmt = sd_fmt->format;
+		sensor->active_crop = new_mode->crop;
 
 		vd56g3_update_controls(sensor);
 	}
@@ -1720,7 +1719,7 @@ static int vd56g3_get_selection(struct v4l2_subdev *sd,
 
 	switch (sel->target) {
 	case V4L2_SEL_TGT_CROP:
-		sel->r = sensor->current_mode->crop;
+		sel->r = sensor->active_crop;
 		break;
 	case V4L2_SEL_TGT_NATIVE_SIZE:
 	case V4L2_SEL_TGT_CROP_DEFAULT:
@@ -2326,15 +2325,12 @@ static int vd56g3_subdev_init(struct vd56g3 *sensor)
 	int ret;
 
 	mutex_init(&sensor->lock);
-	sensor->streaming = false;
-	/* Default resolution mode / raw8 */
-	sensor->current_mode = &vd56g3_supported_modes[1];
-	sensor->img_mbus_code = vd56g3_mbus_codes[0][0];
 
 	/* Init sub device */
 	v4l2_i2c_subdev_init(&sensor->sd, client, &vd56g3_subdev_ops);
 	sensor->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	sensor->sd.entity.ops = &vd56g3_subdev_entity_ops;
+
 	/* Init source pad */
 	sensor->pad[IMAGE_PAD].flags = MEDIA_PAD_FL_SOURCE;
 #if KERNEL_VERSION(4, 5, 0) > LINUX_VERSION_CODE
@@ -2344,17 +2340,24 @@ static int vd56g3_subdev_init(struct vd56g3 *sensor)
 	sensor->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
 	ret = media_entity_pads_init(&sensor->sd.entity, NUM_PADS, sensor->pad);
 #endif
-
 	if (ret) {
 		dev_err(&client->dev, "Failed to init media entity : %d", ret);
 		return ret;
 	}
 
+	/* Init controls */
 	ret = vd56g3_init_controls(sensor);
 	if (ret) {
 		dev_err(&client->dev, "Controls initialization failed %d", ret);
 		goto err_media;
 	}
+
+	/* Init vd56g3 struct : default resolution + raw8 */
+	sensor->streaming = false;
+	vd56g3_update_img_pad_format(sensor, &vd56g3_supported_modes[1],
+				     vd56g3_mbus_codes[0][0],
+				     &sensor->active_fmt);
+	sensor->active_crop = vd56g3_supported_modes[1].crop;
 
 	vd56g3_update_controls(sensor);
 
