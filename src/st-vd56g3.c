@@ -20,6 +20,7 @@
 #include <media/v4l2-async.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
+#include <media/v4l2-event.h>
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
 
@@ -1764,7 +1765,10 @@ static int vd56g3_init_cfg(struct v4l2_subdev *sd,
 }
 #endif
 
-static const struct v4l2_subdev_core_ops vd56g3_core_ops = {};
+static const struct v4l2_subdev_core_ops vd56g3_core_ops = {
+	.subscribe_event = v4l2_ctrl_subdev_subscribe_event,
+	.unsubscribe_event = v4l2_event_subdev_unsubscribe,
+};
 
 static const struct v4l2_subdev_pad_ops vd56g3_pad_ops = {
 #if KERNEL_VERSION(4, 7, 0) > LINUX_VERSION_CODE
@@ -2328,7 +2332,8 @@ static int vd56g3_subdev_init(struct vd56g3 *sensor)
 
 	/* Init sub device */
 	v4l2_i2c_subdev_init(&sensor->sd, client, &vd56g3_subdev_ops);
-	sensor->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
+	sensor->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE |
+			    V4L2_SUBDEV_FL_HAS_EVENTS;
 	sensor->sd.entity.ops = &vd56g3_subdev_entity_ops;
 
 	/* Init source pad */
