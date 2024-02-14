@@ -267,7 +267,6 @@ enum vd56g3_models {
 struct vd56g3_mode {
 	u32 width;
 	u32 height;
-	struct v4l2_rect crop;
 };
 
 /**
@@ -301,92 +300,38 @@ static const struct vd56g3_mode vd56g3_supported_modes[] = {
 	{
 		.width = VD56G3_NATIVE_WIDTH,
 		.height = VD56G3_NATIVE_HEIGHT,
-		.crop = {
-			.left = 0,
-			.top = 0,
-			.width = VD56G3_NATIVE_WIDTH,
-			.height = VD56G3_NATIVE_HEIGHT,
-		},
 	},
 	{
 		.width = VD56G3_DEFAULT_WIDTH,
 		.height = VD56G3_DEFAULT_HEIGHT,
-		.crop = {
-			.left = 2,
-			.top = 2,
-			.width = VD56G3_DEFAULT_WIDTH,
-			.height = VD56G3_DEFAULT_HEIGHT,
-		},
 	},
 	{
 		.width = 1024,
 		.height = 1280,
-		.crop = {
-			.left = 50,
-			.top = 42,
-			.width = 1024,
-			.height = 1280,
-		},
 	},
 	{
 		.width = 1024,
 		.height = 768,
-		.crop = {
-			.left = 50,
-			.top = 298,
-			.width = 1024,
-			.height = 768,
-		},
 	},
 	{
 		.width = 768,
 		.height = 1024,
-		.crop = {
-			.left = 178,
-			.top = 170,
-			.width = 768,
-			.height = 1024,
-		},
 	},
 	{
 		.width = 720,
 		.height = 1280,
-		.crop = {
-			.left = 202,
-			.top = 42,
-			.width = 720,
-			.height = 1280,
-		},
 	},
 	{
 		.width = 640,
 		.height = 480,
-		.crop = {
-			.left = 242,
-			.top = 442,
-			.width = 640,
-			.height = 480,
-		},
 	},
 	{
 		.width = 480,
 		.height = 640,
-		.crop = {
-			.left = 82,
-			.top = 42,
-			.width = 960,
-			.height = 1280,
-		},
 	},
 	{
 		.width = 320,
 		.height = 240,
-		.crop = {
-			.left = 242,
-			.top = 442,
-			.width = 640,
-			.height = 480,
-		},
 	},
 };
 
@@ -1658,6 +1603,8 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 	struct i2c_client *client = sensor->i2c_client;
 	const struct vd56g3_mode *new_mode;
 	struct v4l2_mbus_framefmt *pad_fmt;
+	struct v4l2_rect pad_crop;
+	unsigned int binning;
 
 	dev_dbg(&client->dev, "%s[%d][%s] -> :%dx%d", __func__, sd_fmt->pad,
 		(sd_fmt->which == V4L2_SUBDEV_FORMAT_TRY) ? "try" : "active",
@@ -1671,7 +1618,7 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 
 	mutex_lock(&sensor->lock);
 
-	/* find best format */
+	/* Identify the mode that best suits the requested resolution */
 #if KERNEL_VERSION(4, 17, 0) > LINUX_VERSION_CODE
 	new_mode = vd56g3_find_nearest_size(&sd_fmt->format);
 #else
@@ -1680,8 +1627,18 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 					  width, height, sd_fmt->format.width,
 					  sd_fmt->format.height);
 #endif
+	/* Update fmt struct with identified resolution and mbus code */
 	vd56g3_update_img_pad_format(sensor, new_mode, sd_fmt->format.code,
 				     &sd_fmt->format);
+
+	/* Compute crop rectangle (maximized via binning) */
+	binning = min(VD56G3_NATIVE_WIDTH / sd_fmt->format.width,
+		      VD56G3_NATIVE_HEIGHT / sd_fmt->format.height);
+	binning = min(binning, 2U);
+	pad_crop.width = sd_fmt->format.width * binning;
+	pad_crop.height = sd_fmt->format.height * binning;
+	pad_crop.left = (VD56G3_NATIVE_WIDTH - pad_crop.width) / 2;
+	pad_crop.top = (VD56G3_NATIVE_HEIGHT - pad_crop.height) / 2;
 
 	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
@@ -1698,7 +1655,7 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 		// This nested 'if' only avoid to reset ctrls while format
 		// hasn't changed (userspace pb, we shouldn't interfere ?)
 		sensor->active_fmt = sd_fmt->format;
-		sensor->active_crop = new_mode->crop;
+		sensor->active_crop = pad_crop;
 
 		vd56g3_update_controls(sensor);
 	}
@@ -2362,7 +2319,10 @@ static int vd56g3_subdev_init(struct vd56g3 *sensor)
 	vd56g3_update_img_pad_format(sensor, &vd56g3_supported_modes[1],
 				     vd56g3_mbus_codes[0][0],
 				     &sensor->active_fmt);
-	sensor->active_crop = vd56g3_supported_modes[1].crop;
+	sensor->active_crop.width = vd56g3_supported_modes[1].width;
+	sensor->active_crop.height = vd56g3_supported_modes[1].height;
+	sensor->active_crop.left = 2;
+	sensor->active_crop.top = 2;
 
 	vd56g3_update_controls(sensor);
 
