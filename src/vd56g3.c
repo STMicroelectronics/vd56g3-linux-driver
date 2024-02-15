@@ -1862,9 +1862,12 @@ static int vd56g3_get_selection(struct v4l2_subdev *sd,
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 static int vd56g3_init_cfg(struct v4l2_subdev *sd,
 			   struct v4l2_subdev_pad_config *cfg)
-#else
+#elif KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
 static int vd56g3_init_cfg(struct v4l2_subdev *sd,
 			   struct v4l2_subdev_state *sd_state)
+#else
+static int vd56g3_init_state(struct v4l2_subdev *sd,
+			     struct v4l2_subdev_state *sd_state)
 #endif
 {
 #if KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE
@@ -1906,8 +1909,9 @@ static const struct v4l2_subdev_core_ops vd56g3_core_ops = {
 
 static const struct v4l2_subdev_pad_ops vd56g3_pad_ops = {
 #if KERNEL_VERSION(4, 7, 0) > LINUX_VERSION_CODE
-#else
+#elif KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
 	.init_cfg = vd56g3_init_cfg,
+#else
 #endif
 	.enum_mbus_code = vd56g3_enum_mbus_code,
 	.enum_frame_size = vd56g3_enum_frame_size,
@@ -1930,6 +1934,12 @@ static const struct media_entity_operations vd56g3_subdev_entity_ops = {
 	.link_validate = v4l2_subdev_link_validate,
 };
 
+#if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
+#else
+static const struct v4l2_subdev_internal_ops vd56g3_internal_ops = {
+	.init_state = vd56g3_init_state,
+};
+#endif
 /* -----------------------------------------------------------------------------
  * Boot section (includes FMW and VT Patch)
  */
@@ -2468,6 +2478,10 @@ static int vd56g3_subdev_init(struct vd56g3 *sensor)
 
 	/* Init sub device */
 	v4l2_i2c_subdev_init(&sensor->sd, client, &vd56g3_subdev_ops);
+#if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
+#else
+	sensor->sd.internal_ops = &vd56g3_internal_ops;
+#endif
 	sensor->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE |
 			    V4L2_SUBDEV_FL_HAS_EVENTS;
 	sensor->sd.entity.ops = &vd56g3_subdev_entity_ops;
