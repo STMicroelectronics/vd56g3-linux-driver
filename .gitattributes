@@ -10,3 +10,4 @@ release export-ignore
 readme.md export-ignore
 Jenkinsfile export-ignore
 debian export-ignore
+CONTRIBUTING.md export-ignore
