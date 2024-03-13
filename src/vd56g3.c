@@ -1797,13 +1797,6 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 	pad_fmt = v4l2_subdev_state_get_format(sd_state, sd_fmt->pad);
 #endif
 
-	/* Avoid to reset ctrls while format hasn't changed */
-	if (sd_fmt->format.width == pad_fmt->width &&
-	    sd_fmt->format.height == pad_fmt->height &&
-	    sd_fmt->format.code == pad_fmt->code &&
-	    sd_fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE)
-		return 0;
-
 	/* Update active state's format and crop */
 	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE)
 		ret = vd56g3_update_controls(sensor);
