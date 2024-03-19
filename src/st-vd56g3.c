@@ -214,13 +214,13 @@ int pm_runtime_get_if_in_use(struct device *dev)
 #define VD56G3_TARGET_PLL				804000000UL
 #define VD56G3_VT_CLOCK_DIV				5
 
-/* Line length and Frame length (valid for 10bits ADC only) */
-#define VD56G3_LINE_LENGTH_MIN				1236				// line length for normal (10bits) ADC mode
-#define VD56G3_FRAME_LENGTH_OFFSET			110				// This limits the framerate to 88.5FPS at full resolution
-#define VD56G3_FRAME_LENGTH_DEF_60FPS			2168				// (1/60)/(line_length/pixel_clock)
+/* Line length and Frame length (settings are for standard 10bits ADC mode) */
+#define VD56G3_LINE_LENGTH_MIN				1236
+#define VD56G3_FRAME_LENGTH_OFFSET			110
+#define VD56G3_FRAME_LENGTH_DEF_60FPS			2168
 
 /* Exposure settings */
-#define VD56G3_EXPOSURE_OFFSET				(68 + 7)			// EXP_COARSE_INTG_MARGIN + 7
+#define VD56G3_EXPOSURE_OFFSET				75
 #define VD56G3_EXPOSURE_DEFAULT				1420
 
 /* Output Interface settings */
@@ -854,7 +854,7 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 	if (ctrl->flags & V4L2_CTRL_FLAG_READ_ONLY)
 		return 0;
 
-	/* Update controls state, range, etc. whatever the state of the HW*/
+	/* Update controls state, range, etc. whatever the state of the HW */
 	switch (ctrl->id) {
 	case V4L2_CID_VBLANK:
 		frame_length = sensor->active_crop.height + ctrl->val;
