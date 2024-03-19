@@ -678,9 +678,9 @@ static int vd56g3_get_temp(struct vd56g3 *sensor, int *temp)
 
 static int vd56g3_get_expo_cluster(struct vd56g3 *sensor, bool force_cur_val)
 {
-	int exposure;
-	int again;
-	int dgain;
+	int exposure = 0;
+	int again = 0;
+	int dgain = 0;
 	int ret = 0;
 
 	/* When 'force_cur_val' is enabled, save the ctrl value in 'cur.val'
@@ -845,10 +845,10 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 	struct v4l2_subdev *sd = ctrl_to_sd(ctrl);
 	struct vd56g3 *sensor = to_vd56g3(sd);
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	unsigned int frame_length;
+	unsigned int frame_length = 0;
 	unsigned int expo_max;
 	unsigned int ae_compensation;
-	bool is_auto;
+	bool is_auto = false;
 	int ret;
 
 	if (ctrl->flags & V4L2_CTRL_FLAG_READ_ONLY)
@@ -1750,7 +1750,7 @@ static int vd56g3_patch(struct vd56g3 *sensor)
 	int patch_size = sizeof(patch_cut2);
 	u8 patch_major;
 	u8 patch_minor;
-	int cur_patch_rev;
+	int cur_patch_rev = 0;
 	int ret = 0;
 
 	patch_major = patch[3];
@@ -1792,7 +1792,7 @@ static int vd56g3_vtpatch(struct vd56g3 *sensor)
 	struct i2c_client *client = sensor->i2c_client;
 	int i;
 	int vtpatch_offset = 0;
-	int cur_vtpatch_rev;
+	int cur_vtpatch_rev = 0;
 	int ret = 0;
 
 	vd56g3_write(sensor, VD56G3_REG_VTPATCHING,
