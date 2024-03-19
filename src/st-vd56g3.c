@@ -1536,7 +1536,6 @@ static int vd56g3_get_pad_fmt(struct v4l2_subdev *sd,
 			      struct v4l2_subdev_format *sd_fmt)
 {
 	struct vd56g3 *sensor = to_vd56g3(sd);
-	struct i2c_client *client = sensor->i2c_client;
 	struct v4l2_mbus_framefmt *pad_fmt;
 
 	if (sd_fmt->pad >= NUM_PADS)
@@ -1563,10 +1562,6 @@ static int vd56g3_get_pad_fmt(struct v4l2_subdev *sd,
 	}
 
 	mutex_unlock(&sensor->lock);
-
-	dev_dbg(&client->dev, "%s[%d][%s] <- :%dx%d", __func__, sd_fmt->pad,
-		(sd_fmt->which == V4L2_SUBDEV_FORMAT_TRY) ? "try" : "active",
-		sd_fmt->format.width, sd_fmt->format.height);
 
 	return 0;
 }
@@ -1600,15 +1595,10 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 			      struct v4l2_subdev_format *sd_fmt)
 {
 	struct vd56g3 *sensor = to_vd56g3(sd);
-	struct i2c_client *client = sensor->i2c_client;
 	const struct vd56g3_mode *new_mode;
 	struct v4l2_mbus_framefmt *pad_fmt;
 	struct v4l2_rect pad_crop;
 	unsigned int binning;
-
-	dev_dbg(&client->dev, "%s[%d][%s] -> :%dx%d", __func__, sd_fmt->pad,
-		(sd_fmt->which == V4L2_SUBDEV_FORMAT_TRY) ? "try" : "active",
-		sd_fmt->format.width, sd_fmt->format.height);
 
 	if (sd_fmt->pad >= NUM_PADS)
 		return -EINVAL;
@@ -1788,15 +1778,11 @@ static int vd56g3_patch(struct vd56g3 *sensor)
 
 static int vd56g3_boot(struct vd56g3 *sensor)
 {
-	struct i2c_client *client = sensor->i2c_client;
 	int ret = 0;
 
 	vd56g3_write(sensor, VD56G3_REG_BOOT, VD56G3_CMD_BOOT, &ret);
 	vd56g3_poll_reg(sensor, VD56G3_REG_BOOT, VD56G3_CMD_ACK, &ret);
 	vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_SW_STBY, &ret);
-
-	if (ret == 0)
-		dev_info(&client->dev, "sensor boot successfully");
 
 	return ret;
 }
@@ -2180,7 +2166,7 @@ static int vd56g3_prepare_clock_tree(struct vd56g3 *sensor)
 	if (sensor->ext_clock < 6 * HZ_PER_MHZ ||
 	    sensor->ext_clock > 27 * HZ_PER_MHZ) {
 		dev_err(&client->dev,
-			"Only 6Mhz-27Mhz clock range supported. provide %lu MHz\n",
+			"Only 6Mhz-27Mhz clock range supported. Provided %lu MHz\n",
 			sensor->ext_clock / HZ_PER_MHZ);
 		return -EINVAL;
 	}
@@ -2200,12 +2186,6 @@ static int vd56g3_prepare_clock_tree(struct vd56g3 *sensor)
 	/* Pixel Clock = PLL Output Clock / VD56G3_VT_CLOCK_DIV ≈ 160.8Mhz */
 	pll_out = sensor->ext_clock * sensor->pll_mult / sensor->pll_prediv;
 	sensor->pixel_clock = pll_out / VD56G3_VT_CLOCK_DIV;
-
-	dev_dbg(&client->dev, "Ext Clock = %d Hz", sensor->ext_clock);
-	dev_dbg(&client->dev, "PLL prediv = %d", sensor->pll_prediv);
-	dev_dbg(&client->dev, "PLL mult = %d", sensor->pll_mult);
-	dev_dbg(&client->dev, "PLL Output = %dHz", pll_out);
-	dev_dbg(&client->dev, "Pixel Clock = %dHz", sensor->pixel_clock);
 
 	return 0;
 }
@@ -2439,7 +2419,8 @@ static int vd56g3_probe(struct i2c_client *client)
 	pm_runtime_mark_last_busy(dev);
 	pm_runtime_put_autosuspend(dev);
 
-	dev_info(&client->dev, "vd56g3 probe successfully");
+	dev_info(&client->dev, "Successfully probe %s sensor",
+		 (sensor->is_mono) ? "vd56g3" : "vd66gy");
 
 	return 0;
 
