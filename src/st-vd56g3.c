@@ -365,11 +365,6 @@ static const struct regmap_config vd56g3_regmap_config = {
 };
 #endif
 
-enum vd56g3_pad_types {
-	IMAGE_PAD,
-	NUM_PADS
-};
-
 enum vd56g3_expo_state {
 	VD56G3_EXPO_AUTO,
 	VD56G3_EXPO_AUTO_FREEZE,
@@ -379,7 +374,7 @@ enum vd56g3_expo_state {
 struct vd56g3 {
 	struct i2c_client *i2c_client;
 	struct v4l2_subdev sd;
-	struct media_pad pad[NUM_PADS];
+	struct media_pad pad;
 	struct regulator_bulk_data supplies[VD56G3_NUM_SUPPLIES];
 	struct gpio_desc *reset_gpio;
 	struct clk *xclk;
@@ -1479,9 +1474,6 @@ static int vd56g3_enum_mbus_code(struct v4l2_subdev *sd,
 {
 	struct vd56g3 *sensor = to_vd56g3(sd);
 
-	if (code->pad >= NUM_PADS)
-		return -EINVAL;
-
 	if (code->index >= ARRAY_SIZE(vd56g3_mbus_codes))
 		return -EINVAL;
 
@@ -1499,8 +1491,6 @@ static int vd56g3_enum_frame_size(struct v4l2_subdev *sd,
 #endif
 				  struct v4l2_subdev_frame_size_enum *fse)
 {
-	if (fse->pad >= NUM_PADS)
-		return -EINVAL;
 	if (fse->index >= ARRAY_SIZE(vd56g3_supported_modes))
 		return -EINVAL;
 
@@ -1537,9 +1527,6 @@ static int vd56g3_get_pad_fmt(struct v4l2_subdev *sd,
 {
 	struct vd56g3 *sensor = to_vd56g3(sd);
 	struct v4l2_mbus_framefmt *pad_fmt;
-
-	if (sd_fmt->pad >= NUM_PADS)
-		return -EINVAL;
 
 	mutex_lock(&sensor->lock);
 
@@ -1599,9 +1586,6 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 	struct v4l2_mbus_framefmt *pad_fmt;
 	struct v4l2_rect pad_crop;
 	unsigned int binning;
-
-	if (sd_fmt->pad >= NUM_PADS)
-		return -EINVAL;
 
 	if (sensor->streaming)
 		return -EBUSY;
@@ -1696,13 +1680,13 @@ static int vd56g3_init_cfg(struct v4l2_subdev *sd,
 	struct vd56g3 *sensor = to_vd56g3(sd);
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
 	struct v4l2_mbus_framefmt *img_pad_fmt =
-		v4l2_subdev_get_try_format(sd, cfg, IMAGE_PAD);
+		v4l2_subdev_get_try_format(sd, cfg, 0);
 #elif LINUX_VERSION_CODE < KERNEL_VERSION(5, 19, 0)
 	struct v4l2_mbus_framefmt *img_pad_fmt =
-		v4l2_subdev_get_try_format(sd, sd_state, IMAGE_PAD);
+		v4l2_subdev_get_try_format(sd, sd_state, 0);
 #else
 	struct v4l2_mbus_framefmt *img_pad_fmt =
-		v4l2_subdev_get_pad_format(sd, sd_state, IMAGE_PAD);
+		v4l2_subdev_get_pad_format(sd, sd_state, 0);
 #endif
 
 	/* Default resolution mode / raw8 */
@@ -2274,13 +2258,13 @@ static int vd56g3_subdev_init(struct vd56g3 *sensor)
 	sensor->sd.entity.ops = &vd56g3_subdev_entity_ops;
 
 	/* Init source pad */
-	sensor->pad[IMAGE_PAD].flags = MEDIA_PAD_FL_SOURCE;
+	sensor->pad.flags = MEDIA_PAD_FL_SOURCE;
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 5, 0)
 	sensor->sd.entity.type = MEDIA_ENT_T_V4L2_SUBDEV_SENSOR;
-	ret = media_entity_init(&sensor->sd.entity, NUM_PADS, sensor->pad, 0);
+	ret = media_entity_init(&sensor->sd.entity, 1, &sensor->pad, 0);
 #else
 	sensor->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
-	ret = media_entity_pads_init(&sensor->sd.entity, NUM_PADS, sensor->pad);
+	ret = media_entity_pads_init(&sensor->sd.entity, 1, &sensor->pad);
 #endif
 	if (ret) {
 		dev_err(&client->dev, "Failed to init media entity : %d", ret);
