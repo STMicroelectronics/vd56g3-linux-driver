@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Driver for VD56G3 (Mono) and VD66GY (RGB) global shutter sensors
- *
- * Copyright (C) STMicroelectronics SA 2019
+ * A V4L2 driver for ST VD56G3 (Mono) and VD66GY (RGB) global shutter cameras.
+ * Copyright (C) 2019, STMicroelectronics SA
  */
 
 #include <linux/clk.h>
@@ -2464,7 +2463,8 @@ static struct i2c_driver vd56g3_i2c_driver = {
 
 module_i2c_driver(vd56g3_i2c_driver);
 
+MODULE_AUTHOR("Benjamin Mugnier <benjamin.mugnier@foss.st.com>");
 MODULE_AUTHOR("Mickael Guene <mickael.guene@st.com>");
 MODULE_AUTHOR("Sylvain Petinot <sylvain.petinot@foss.st.com>");
-MODULE_DESCRIPTION("VD56G3 camera subdev driver");
+MODULE_DESCRIPTION("ST VD56G3 sensor driver");
 MODULE_LICENSE("GPL");
