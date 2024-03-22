@@ -1214,7 +1214,7 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 
 	/*
 	 * Analog gain [1, 8] is computed with the following logic :
-	 * 32/(32 − again_reg), with again_reg in the range [0:28]
+	 * 32/(32 - again_reg), with again_reg in the range [0:28]
 	 * Digital gain [1.00, 8.00] is coded as a Fixed Point 5.8
 	 */
 	sensor->again_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_ANALOGUE_GAIN,
@@ -2165,9 +2165,9 @@ static int vd56g3_prepare_clock_tree(struct vd56g3 *sensor)
 	sensor->pll_mult = (VD56G3_TARGET_PLL * sensor->pll_prediv +
 			    sensor->ext_clock / 2) /
 			   sensor->ext_clock;
-
-	/* Pixel Clock = PLL Output Clock / VD56G3_VT_CLOCK_DIV ≈ 160.8Mhz */
 	pll_out = sensor->ext_clock * sensor->pll_mult / sensor->pll_prediv;
+
+	/* Target Pixel Clock for standard 10bit ADC mode : 160.8Mhz */
 	sensor->pixel_clock = pll_out / VD56G3_VT_CLOCK_DIV;
 
 	return 0;
