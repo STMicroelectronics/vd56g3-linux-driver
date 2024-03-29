@@ -109,7 +109,7 @@ int pm_runtime_get_if_in_use(struct device *dev)
 #define VD56G3_REG_TEMPERATURE				CCI_REG16_LE(0x004c)
 #define VD56G3_REG_APPLIED_COARSE_EXPOSURE		CCI_REG16_LE(0x0064)
 #define VD56G3_REG_APPLIED_ANALOG_GAIN			CCI_REG8(0x0068)
-#define VD56G3_REG_APPLIED_DIGITAL_GAIN			CCI_REG16_LE(0x006A)
+#define VD56G3_REG_APPLIED_DIGITAL_GAIN			CCI_REG16_LE(0x006a)
 #define VD56G3_REG_BOOT					CCI_REG8(0x0200)
 #define VD56G3_CMD_ACK					0
 #define VD56G3_CMD_BOOT					1
@@ -140,17 +140,17 @@ int pm_runtime_get_if_in_use(struct device *dev)
 #define VD56G3_DARKCAL_DISABLE_DARKAVG			2
 #define VD56G3_REG_PATGEN_CTRL				CCI_REG16_LE(0x0400)
 #define VD56G3_REG_DARKCAL_PEDESTAL			CCI_REG8(0x0415)
-#define VD56G3_REG_AE_COLDSTART_COARSE_EXPOSURE		CCI_REG16_LE(0x042A)
-#define VD56G3_REG_AE_COLDSTART_ANALOG_GAIN		CCI_REG8(0x042C)
-#define VD56G3_REG_AE_COLDSTART_DIGITAL_GAIN		CCI_REG16_LE(0x042E)
+#define VD56G3_REG_AE_COLDSTART_COARSE_EXPOSURE		CCI_REG16_LE(0x042a)
+#define VD56G3_REG_AE_COLDSTART_ANALOG_GAIN		CCI_REG8(0x042c)
+#define VD56G3_REG_AE_COLDSTART_DIGITAL_GAIN		CCI_REG16_LE(0x042e)
 #define VD56G3_REG_AE_COMPILER_CONTROL			CCI_REG8(0x0430)
 #define VD56G3_REG_AE_ROI_START_H			CCI_REG16_LE(0x0432)
 #define VD56G3_REG_AE_ROI_START_V			CCI_REG16_LE(0x0434)
 #define VD56G3_REG_AE_ROI_END_H				CCI_REG16_LE(0x0436)
 #define VD56G3_REG_AE_ROI_END_V				CCI_REG16_LE(0x0438)
-#define VD56G3_REG_AE_COMPENSATION			CCI_REG16_LE(0x043A)
-#define VD56G3_REG_AE_TARGET_PERCENTAGE			CCI_REG16_LE(0x043C)
-#define VD56G3_REG_AE_STEP_PROPORTION			CCI_REG16_LE(0x043E)
+#define VD56G3_REG_AE_COMPENSATION			CCI_REG16_LE(0x043a)
+#define VD56G3_REG_AE_TARGET_PERCENTAGE			CCI_REG16_LE(0x043c)
+#define VD56G3_REG_AE_STEP_PROPORTION			CCI_REG16_LE(0x043e)
 #define VD56G3_REG_AE_LEAK_PROPORTION			CCI_REG16_LE(0x0440)
 #define VD56G3_REG_EXP_MODE				CCI_REG8(0x044c)
 #define VD56G3_EXP_MODE_AUTO				0
@@ -208,6 +208,7 @@ int pm_runtime_get_if_in_use(struct device *dev)
 #define VD56G3_NATIVE_HEIGHT				1364
 #define VD56G3_DEFAULT_WIDTH				1120
 #define VD56G3_DEFAULT_HEIGHT				1360
+#define VD56G3_DEFAULT_MODE				1
 
 /* PLL settings */
 #define VD56G3_TARGET_PLL				804000000UL
@@ -215,11 +216,11 @@ int pm_runtime_get_if_in_use(struct device *dev)
 
 /* Line length and Frame length (settings are for standard 10bits ADC mode) */
 #define VD56G3_LINE_LENGTH_MIN				1236
-#define VD56G3_FRAME_LENGTH_OFFSET			110
+#define VD56G3_VBLANK_MIN				110
 #define VD56G3_FRAME_LENGTH_DEF_60FPS			2168
 
 /* Exposure settings */
-#define VD56G3_EXPOSURE_OFFSET				75
+#define VD56G3_EXPOSURE_MARGIN				75
 #define VD56G3_EXPOSURE_DEFAULT				1420
 
 /* Output Interface settings */
@@ -670,7 +671,7 @@ static int vd56g3_get_temp(struct vd56g3 *sensor, int *temp)
 		return vd56g3_get_temp_stream_disable(sensor, temp);
 }
 
-static int vd56g3_get_expo_cluster(struct vd56g3 *sensor, bool force_cur_val)
+static int vd56g3_read_expo_cluster(struct vd56g3 *sensor, bool force_cur_val)
 {
 	int exposure = 0;
 	int again = 0;
@@ -821,7 +822,7 @@ static int vd56g3_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 		ctrl->val = temperature;
 		break;
 	case V4L2_CID_EXPOSURE_AUTO:
-		ret = vd56g3_get_expo_cluster(sensor, false);
+		ret = vd56g3_read_expo_cluster(sensor, false);
 		break;
 	default:
 		ret = -EINVAL;
@@ -852,7 +853,7 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 	switch (ctrl->id) {
 	case V4L2_CID_VBLANK:
 		frame_length = sensor->active_crop.height + ctrl->val;
-		expo_max = frame_length - VD56G3_EXPOSURE_OFFSET;
+		expo_max = frame_length - VD56G3_EXPOSURE_MARGIN;
 		__v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max, 1,
 					 VD56G3_EXPOSURE_DEFAULT);
 		break;
@@ -1132,12 +1133,12 @@ static void vd56g3_update_controls(struct vd56g3 *sensor)
 {
 	unsigned int hblank =
 		VD56G3_LINE_LENGTH_MIN - sensor->active_crop.width;
-	unsigned int vblank_min = VD56G3_FRAME_LENGTH_OFFSET;
+	unsigned int vblank_min = VD56G3_VBLANK_MIN;
 	unsigned int vblank =
 		VD56G3_FRAME_LENGTH_DEF_60FPS - sensor->active_crop.height;
 	unsigned int vblank_max = 0xffff - sensor->active_crop.height;
 	unsigned int frame_length = sensor->active_crop.height + vblank;
-	unsigned int expo_max = frame_length - VD56G3_EXPOSURE_OFFSET;
+	unsigned int expo_max = frame_length - VD56G3_EXPOSURE_MARGIN;
 
 	/* Update blanking and exposure (ranges + values) */
 	__v4l2_ctrl_modify_range(sensor->hblank_ctrl, hblank, hblank, 1,
@@ -1162,7 +1163,7 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 	/* we can use our own mutex for the ctrl lock */
 	hdl->lock = &sensor->lock;
 
-	/* Horizontal & vertival Flips modify bayer code with RGB variant*/
+	/* Horizontal & vertical Flips modify bayer code with RGB variant*/
 	sensor->hflip_ctrl =
 		v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HFLIP, 0, 1, 1, 0);
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0)
@@ -1202,14 +1203,13 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 						 V4L2_EXPOSURE_MANUAL, 0,
 						 V4L2_EXPOSURE_AUTO);
 
-	sensor->ae_lock_ctrl =
-		v4l2_ctrl_new_std(hdl, ops, V4L2_CID_3A_LOCK, 0, 7, 0, 0);
+	sensor->ae_lock_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_3A_LOCK, 0,
+						 GENMASK(2, 0), 0, 0);
 
 	sensor->ae_bias_ctrl =
 		v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_AUTO_EXPOSURE_BIAS,
 				       ARRAY_SIZE(vd56g3_ev_bias_qmenu) - 1,
-				       (ARRAY_SIZE(vd56g3_ev_bias_qmenu) + 1) /
-				       2 - 1,
+				       ARRAY_SIZE(vd56g3_ev_bias_qmenu) / 2,
 				       vd56g3_ev_bias_qmenu);
 
 	/*
@@ -1253,7 +1253,7 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 		v4l2_ctrl_new_custom(hdl, &vd56g3_ae_leak_prop_ctrl, NULL);
 	v4l2_ctrl_new_custom(hdl, &vd56g3_darkcal_pedestal_ctrl, NULL);
 
-	/* Addition controls based on device tree properties */
+	/* Additional controls based on device tree properties */
 	if (sensor->ext_vt_sync)
 		sensor->slave_ctrl =
 			v4l2_ctrl_new_custom(hdl, &vd56g3_slave_ctrl, NULL);
@@ -1367,7 +1367,7 @@ static int vd56g3_stream_off(struct vd56g3 *sensor)
 	int ret = 0;
 
 	/* Retrieve Expo cluster to enable coldstart of AE*/
-	ret = vd56g3_get_expo_cluster(sensor, true);
+	ret = vd56g3_read_expo_cluster(sensor, true);
 
 	vd56g3_write(sensor, VD56G3_REG_STREAMING, VD56G3_CMD_STOP_STREAM,
 		     &ret);
@@ -1677,6 +1677,7 @@ static int vd56g3_init_cfg(struct v4l2_subdev *sd,
 #endif
 {
 	struct vd56g3 *sensor = to_vd56g3(sd);
+	unsigned int def_mode = VD56G3_DEFAULT_MODE;
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
 	struct v4l2_mbus_framefmt *img_pad_fmt =
 		v4l2_subdev_get_try_format(sd, cfg, 0);
@@ -1689,7 +1690,7 @@ static int vd56g3_init_cfg(struct v4l2_subdev *sd,
 #endif
 
 	/* Default resolution mode / raw8 */
-	vd56g3_update_img_pad_format(sensor, &vd56g3_supported_modes[1],
+	vd56g3_update_img_pad_format(sensor, &vd56g3_supported_modes[def_mode],
 				     vd56g3_mbus_codes[0][0], img_pad_fmt);
 	return 0;
 }
@@ -1927,6 +1928,7 @@ static int vd56g3_check_csi_conf(struct vd56g3 *sensor,
 #endif
 	u32 phy_data_lanes[VD56G3_MAX_CSI_DATA_LANES] = { ~0, ~0 };
 	int n_lanes;
+	int frequency;
 	int p, l;
 	int ret = 0;
 
@@ -1981,10 +1983,10 @@ static int vd56g3_check_csi_conf(struct vd56g3 *sensor,
 		ret = -EINVAL;
 		goto done;
 	}
+	frequency = (n_lanes == 2) ? VD56G3_LINK_FREQ_DEF_2LANES :
+				     VD56G3_LINK_FREQ_DEF_1LANE;
 	if (ep.nr_of_link_frequencies != 1 ||
-	    (ep.link_frequencies[0] != (n_lanes == 2 ?
-						VD56G3_LINK_FREQ_DEF_2LANES :
-						VD56G3_LINK_FREQ_DEF_1LANE))) {
+	    ep.link_frequencies[0] != frequency) {
 		dev_err(&client->dev, "Link frequency not supported: %lld\n",
 			ep.link_frequencies[0]);
 		ret = -EINVAL;
@@ -2246,6 +2248,7 @@ static int vd56g3_detect(struct vd56g3 *sensor)
 static int vd56g3_subdev_init(struct vd56g3 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
+	unsigned int def_mode = VD56G3_DEFAULT_MODE;
 	int ret;
 
 	mutex_init(&sensor->lock);
@@ -2279,11 +2282,11 @@ static int vd56g3_subdev_init(struct vd56g3 *sensor)
 
 	/* Init vd56g3 struct : default resolution + raw8 */
 	sensor->streaming = false;
-	vd56g3_update_img_pad_format(sensor, &vd56g3_supported_modes[1],
+	vd56g3_update_img_pad_format(sensor, &vd56g3_supported_modes[def_mode],
 				     vd56g3_mbus_codes[0][0],
 				     &sensor->active_fmt);
-	sensor->active_crop.width = vd56g3_supported_modes[1].width;
-	sensor->active_crop.height = vd56g3_supported_modes[1].height;
+	sensor->active_crop.width = vd56g3_supported_modes[def_mode].width;
+	sensor->active_crop.height = vd56g3_supported_modes[def_mode].height;
 	sensor->active_crop.left = 2;
 	sensor->active_crop.top = 2;
 
