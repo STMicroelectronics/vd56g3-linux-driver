@@ -105,6 +105,10 @@ properties:
               enum: [402000000, 750000000]
 
           lane-polarities:
+            minItems: 1
+            maxItems: 3
+            items:
+              enum: [0, 1]
             description: Any lane can be inverted or not.
 
         required:
