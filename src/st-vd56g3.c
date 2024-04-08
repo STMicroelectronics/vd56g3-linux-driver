@@ -140,6 +140,8 @@ int pm_runtime_get_if_in_use(struct device *dev)
 #define VD56G3_DARKCAL_ENABLE				1
 #define VD56G3_DARKCAL_DISABLE_DARKAVG			2
 #define VD56G3_REG_PATGEN_CTRL				CCI_REG16_LE(0x0400)
+#define VD56G3_PATGEN_ENABLE				1
+#define VD56G3_PATGEN_TYPE_SHIFT			4
 #define VD56G3_REG_DARKCAL_PEDESTAL			CCI_REG8(0x0415)
 #define VD56G3_REG_AE_COLDSTART_COARSE_EXPOSURE		CCI_REG16_LE(0x042a)
 #define VD56G3_REG_AE_COLDSTART_ANALOG_GAIN		CCI_REG8(0x042c)
@@ -709,13 +711,13 @@ static int vd56g3_read_expo_cluster(struct vd56g3 *sensor, bool force_cur_val)
 static int vd56g3_update_patgen(struct vd56g3 *sensor, u32 patgen_index)
 {
 	u32 pattern = patgen_index <= 3 ? patgen_index : patgen_index + 12;
-	u16 patgen = pattern << 4;
+	u16 patgen = pattern << VD56G3_PATGEN_TYPE_SHIFT;
 	u8 duster = VD56G3_DUSTER_ENABLE_DEF_MODULES;
 	u8 darkcal = VD56G3_DARKCAL_ENABLE;
 	int ret = 0;
 
 	if (patgen_index) {
-		patgen |= 1;
+		patgen |= VD56G3_PATGEN_ENABLE;
 		duster = VD56G3_DUSTER_DISABLE;
 		darkcal = VD56G3_DARKCAL_DISABLE_DARKAVG;
 	}
