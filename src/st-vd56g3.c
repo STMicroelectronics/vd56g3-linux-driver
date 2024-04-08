@@ -1233,10 +1233,13 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 
 	/*
 	 * Set the exposure, horizontal and vertical blanking ctrls
-	 * to hardcoded values, they will be updated in vd56g3_ctrl_update().
+	 * to hardcoded values, they will be updated in vd56g3_update_controls.
+	 * Exposure being in an auto-cluster, set a significant value here.
 	 */
-	sensor->expo_ctrl =
-		v4l2_ctrl_new_std(hdl, ops, V4L2_CID_EXPOSURE, 1, 1, 1, 1);
+	sensor->expo_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_EXPOSURE,
+					      VD56G3_EXPOSURE_DEFAULT,
+					      VD56G3_EXPOSURE_DEFAULT, 1,
+					      VD56G3_EXPOSURE_DEFAULT);
 	sensor->hblank_ctrl =
 		v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HBLANK, 1, 1, 1, 1);
 	if (sensor->hblank_ctrl)
