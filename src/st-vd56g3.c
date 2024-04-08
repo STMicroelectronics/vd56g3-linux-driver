@@ -27,7 +27,8 @@
 #include <linux/version.h>
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 8, 0)
-/* Warning : CCI_REGxy_LE definitions doesn't fit exactly with v4l2-cci.h .
+/*
+ * Warning : CCI_REGxy_LE definitions doesn't fit exactly with v4l2-cci.h .
  * In fact endianness is managed directly in vd56g3_read/write() functions.
  */
 #define CCI_REG_ADDR_MASK		GENMASK(15, 0)
@@ -231,7 +232,7 @@ int pm_runtime_get_if_in_use(struct device *dev)
 /* GPIOs */
 #define VD56G3_NB_GPIOS					8
 
-/* parse-SNIP: Custom-CIDs*/
+/* parse-SNIP: Custom-CIDs */
 #define V4L2_CID_TEMPERATURE			(V4L2_CID_USER_BASE | 0x1020)
 #define V4L2_CID_AE_TARGET_PERCENTAGE		(V4L2_CID_USER_BASE | 0x1021)
 #define V4L2_CID_AE_STEP_PROPORTION		(V4L2_CID_USER_BASE | 0x1022)
@@ -256,12 +257,12 @@ static const char *const vd56g3_supply_names[] = {
 #define VD56G3_NUM_SUPPLIES		ARRAY_SIZE(vd56g3_supply_names)
 
 /* -----------------------------------------------------------------------------
- * Models, Modes and formats
+ * Models (VD56G3: Mono, VD66GY: Bayer RGB), Modes and formats
  */
 
 enum vd56g3_models {
-	VD56G3_MODEL_VD56G3, // Mono variant
-	VD56G3_MODEL_VD66GY, // Bayer variant
+	VD56G3_MODEL_VD56G3,
+	VD56G3_MODEL_VD66GY,
 };
 
 struct vd56g3_mode {
@@ -335,7 +336,8 @@ static const struct vd56g3_mode vd56g3_supported_modes[] = {
 	},
 };
 
-/* Sensor support 8bits and 10bits output in both variants
+/*
+ * Sensor support 8bits and 10bits output in both variants
  *  - Monochrome
  *  - RGB (with all H/V flip variations)
  */
@@ -357,7 +359,7 @@ static const unsigned int vd56g3_mbus_codes[2][5] = {
 };
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 8, 0)
-/* Big endian register addresses and 8b, 16b or 32b little endian values .*/
+/* Big endian register addresses and 8b, 16b or 32b little endian values. */
 static const struct regmap_config vd56g3_regmap_config = {
 	.reg_bits = 16,
 	.val_bits = 8,
@@ -428,7 +430,7 @@ static inline struct v4l2_subdev *ctrl_to_sd(struct v4l2_ctrl *ctrl)
 	return &container_of(ctrl->handler, struct vd56g3, ctrl_handler)->sd;
 }
 
-/* ----------------------------------------------------------------------------
+/* -----------------------------------------------------------------------------
  * HW access : Big endian reg addresses and 8b, 16b or 32b little endian values
  */
 
@@ -535,7 +537,8 @@ static int vd56g3_write_array(struct vd56g3 *sensor, u32 reg, unsigned int len,
 	if (err && *err)
 		return *err;
 
-	/* This loop isn't necessary but in certains conditions (platforms, cpu
+	/*
+	 * This loop isn't necessary but in certains conditions (platforms, cpu
 	 * load, etc.) it has been observed that the bulk write could timeout.
 	 */
 	while (len) {
@@ -580,7 +583,7 @@ static int vd56g3_wait_state(struct vd56g3 *sensor, int state, int *err)
 	return vd56g3_poll_reg(sensor, VD56G3_REG_SYSTEM_FSM, state, err);
 }
 
-/* ----------------------------------------------------------------------------
+/* -----------------------------------------------------------------------------
  * Controls: definitions, helpers and handlers
  */
 
@@ -678,7 +681,8 @@ static int vd56g3_read_expo_cluster(struct vd56g3 *sensor, bool force_cur_val)
 	int dgain = 0;
 	int ret = 0;
 
-	/* When 'force_cur_val' is enabled, save the ctrl value in 'cur.val'
+	/*
+	 * When 'force_cur_val' is enabled, save the ctrl value in 'cur.val'
 	 * instead of the normal 'val', this is used during poweroff to cache
 	 * volatile ctrls and enable coldstart.
 	 */
@@ -732,7 +736,7 @@ static int vd56g3_update_expo_cluster(struct vd56g3 *sensor, bool is_auto)
 	if (sensor->ae_ctrl->is_new)
 		vd56g3_write(sensor, VD56G3_REG_EXP_MODE, expo_state, &ret);
 
-	// In Auto expo, set coldstart parameters
+	/* In Auto expo, set coldstart parameters */
 	if (is_auto && sensor->ae_ctrl->is_new) {
 		vd56g3_write(sensor, VD56G3_REG_AE_COLDSTART_COARSE_EXPOSURE,
 			     sensor->expo_ctrl->val, &ret);
@@ -742,7 +746,7 @@ static int vd56g3_update_expo_cluster(struct vd56g3 *sensor, bool is_auto)
 			     sensor->dgain_ctrl->val, &ret);
 	}
 
-	// In Manual expo, set exposure, analog and digital gains
+	/* In Manual expo, set exposure, analog and digital gains */
 	if (!is_auto && sensor->expo_ctrl->is_new)
 		vd56g3_write(sensor, VD56G3_REG_MANUAL_COARSE_EXPOSURE,
 			     sensor->expo_ctrl->val, &ret);
@@ -1163,7 +1167,7 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 	/* we can use our own mutex for the ctrl lock */
 	hdl->lock = &sensor->lock;
 
-	/* Horizontal & vertical Flips modify bayer code with RGB variant*/
+	/* Horizontal & vertical flips modify bayer code on RGB variant */
 	sensor->hflip_ctrl =
 		v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HFLIP, 0, 1, 1, 0);
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0)
@@ -1280,7 +1284,7 @@ free_ctrls:
 	return ret;
 }
 
-/* ----------------------------------------------------------------------------
+/* -----------------------------------------------------------------------------
  * Videos ops
  */
 
@@ -1366,7 +1370,7 @@ static int vd56g3_stream_off(struct vd56g3 *sensor)
 {
 	int ret = 0;
 
-	/* Retrieve Expo cluster to enable coldstart of AE*/
+	/* Retrieve Expo cluster to enable coldstart of AE */
 	ret = vd56g3_read_expo_cluster(sensor, true);
 
 	vd56g3_write(sensor, VD56G3_REG_STREAMING, VD56G3_CMD_STOP_STREAM,
@@ -1429,7 +1433,7 @@ static const struct v4l2_subdev_video_ops vd56g3_video_ops = {
 	.s_stream = vd56g3_s_stream,
 };
 
-/* ----------------------------------------------------------------------------
+/* -----------------------------------------------------------------------------
  * Pad ops
  */
 
@@ -1625,8 +1629,10 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 	} else if (sd_fmt->format.width != sensor->active_fmt.width ||
 		   sd_fmt->format.height != sensor->active_fmt.height ||
 		   sd_fmt->format.code != sensor->active_fmt.code) {
-		// This nested 'if' only avoid to reset ctrls while format
-		// hasn't changed (userspace pb, we shouldn't interfere ?)
+		/*
+		 * This nested 'if' only avoid to reset ctrls while format
+		 * hasn't changed (userspace pb, we shouldn't interfere ?)
+		 */
 		sensor->active_fmt = sd_fmt->format;
 		sensor->active_crop = pad_crop;
 
@@ -1723,7 +1729,7 @@ static const struct media_entity_operations vd56g3_subdev_entity_ops = {
 	.link_validate = v4l2_subdev_link_validate,
 };
 
-/* ----------------------------------------------------------------------------
+/* -----------------------------------------------------------------------------
  * Boot section (includes FMW and VT Patch)
  */
 
@@ -1810,7 +1816,7 @@ static int vd56g3_vtpatch(struct vd56g3 *sensor)
 	return 0;
 }
 
-/* ----------------------------------------------------------------------------
+/* -----------------------------------------------------------------------------
  * Power management
  */
 
@@ -1913,7 +1919,7 @@ static const struct dev_pm_ops vd56g3_pm_ops = {
 	SET_RUNTIME_PM_OPS(vd56g3_runtime_suspend, vd56g3_runtime_resume, NULL)
 };
 
-/* ----------------------------------------------------------------------------
+/* -----------------------------------------------------------------------------
  * Probe and initialization
  */
 
@@ -1944,7 +1950,7 @@ static int vd56g3_check_csi_conf(struct vd56g3 *sensor,
 		return -EINVAL;
 #endif
 
-	// Check lanes number
+	/* Check lanes number */
 	n_lanes = ep.bus.mipi_csi2.num_data_lanes;
 	if (n_lanes != 1 && n_lanes != 2) {
 		dev_err(&client->dev, "Invalid data lane number %d\n", n_lanes);
@@ -1953,15 +1959,16 @@ static int vd56g3_check_csi_conf(struct vd56g3 *sensor,
 	}
 	sensor->nb_of_lane = n_lanes;
 
-	// Clock lane must be first
+	/* Clock lane must be first */
 	if (ep.bus.mipi_csi2.clock_lane != 0) {
 		dev_err(&client->dev, "Clk lane must be mapped to lane 0\n");
 		ret = -EINVAL;
 		goto done;
 	}
 
-	// Prepare Output Interface conf based on lane settings
-	// logical to physical lane conversion (+ pad remaining slots)
+	/* Prepare Output Interface conf based on lane settings
+	 * logical to physical lane conversion (+ pad remaining slots)
+	 */
 	for (l = 0; l < n_lanes; l++)
 		phy_data_lanes[ep.bus.mipi_csi2.data_lanes[l] - 1] = l;
 	for (p = 0; p < VD56G3_MAX_CSI_DATA_LANES; p++) {
@@ -1977,7 +1984,7 @@ static int vd56g3_check_csi_conf(struct vd56g3 *sensor,
 			   ((phy_data_lanes[1]) << 7) |
 			   (ep.bus.mipi_csi2.lane_polarities[2] << 9);
 
-	// Check link frequency
+	/* Check link frequency */
 	if (!ep.nr_of_link_frequencies) {
 		dev_err(&client->dev, "link-frequency not found in DT\n");
 		ret = -EINVAL;
@@ -2386,7 +2393,7 @@ static int vd56g3_probe(struct i2c_client *client)
 		goto err_power_off;
 	}
 
-	/* Initialize, then register V4L2 subdev. */
+	/* Initialize, then register V4L2 subdev */
 	ret = vd56g3_subdev_init(sensor);
 	if (ret) {
 		dev_err(&client->dev, "V4l2 init failed : %d", ret);
