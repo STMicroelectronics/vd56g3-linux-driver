@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.0-rc1] - 2024-04-17
+- dt-bindings : convert text bindings to yaml format
+- Binning mode and Crop are computed dynamically (instead of hardcoded)
+- Convert to CCI register access helpers
+- Rely on regmap APIs for i2c read/write operations
+- Minor improvements to better fit with kernel rules
+
+## [0.12.0] - 2024-02-29
+- Provide DTS files with driver
+- Add README.md
+
 ## [0.11.0] - 2023-12-12
 - Add Fox Fastboot (cut3) support
 - Proper handling of Mono/RGB variants through compatible string
