@@ -1,3 +1,9 @@
+st-vd56g3-dkms (1.0.0-rc1-1) unstable; urgency=medium
+
+  * New upstream release
+
+ -- Sylvain Petinot <sylvain.petinot@st.com>  Wed, 17 Apr 2024 17:15:35 +0200
+
 st-vd56g3-dkms (0.12.0-1) unstable; urgency=medium
 
   * New upstream release
