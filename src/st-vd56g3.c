@@ -251,9 +251,9 @@ int pm_runtime_get_if_in_use(struct device *dev)
 
 /* regulator supplies */
 static const char *const vd56g3_supply_names[] = {
-	"VCORE",
-	"VDDIO",
-	"VANA",
+	"vcore",
+	"vddio",
+	"vana",
 };
 
 #define VD56G3_NUM_SUPPLIES		ARRAY_SIZE(vd56g3_supply_names)
