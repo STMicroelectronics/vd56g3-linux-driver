@@ -230,7 +230,7 @@ int pm_runtime_get_if_in_use(struct device *dev)
 /* Exposure settings */
 #define VD56G3_EXPOSURE_MARGIN				75
 #define VD56G3_EXPOSURE_MIN				21
-#define VD56G3_EXPOSURE_DEFAULT				1420
+#define VD56G3_EXPOSURE_DEFAULT				1420U
 
 /* Output Interface settings */
 #define VD56G3_MAX_CSI_DATA_LANES			2
@@ -857,7 +857,7 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 	unsigned int expo_max;
 	unsigned int ae_compensation;
 	bool is_auto = false;
-	int ret;
+	int ret = 0;
 
 	if (ctrl->flags & V4L2_CTRL_FLAG_READ_ONLY)
 		return 0;
@@ -867,8 +867,10 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_VBLANK:
 		frame_length = sensor->active_crop.height + ctrl->val;
 		expo_max = frame_length - VD56G3_EXPOSURE_MARGIN;
-		__v4l2_ctrl_modify_range(sensor->expo_ctrl, VD56G3_EXPOSURE_MIN,
-					 expo_max, 1, VD56G3_EXPOSURE_DEFAULT);
+		ret = __v4l2_ctrl_modify_range(sensor->expo_ctrl,
+					       VD56G3_EXPOSURE_MIN, expo_max, 1,
+					       min(VD56G3_EXPOSURE_DEFAULT,
+						   expo_max));
 		break;
 	case V4L2_CID_EXPOSURE_AUTO:
 		is_auto = (ctrl->val == V4L2_EXPOSURE_AUTO);
@@ -891,6 +893,9 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 	default:
 		break;
 	}
+
+	if (ret)
+		return ret;
 
 	/* Interact with HW only when it is powered ON */
 	if (!pm_runtime_get_if_in_use(&client->dev))
@@ -1146,7 +1151,7 @@ static const struct v4l2_ctrl_config vd56g3_dgain_ctrl = {
 };
 #endif
 
-static void vd56g3_update_controls(struct vd56g3 *sensor)
+static int vd56g3_update_controls(struct vd56g3 *sensor)
 {
 	unsigned int hblank =
 		VD56G3_LINE_LENGTH_MIN - sensor->active_crop.width;
@@ -1157,16 +1162,29 @@ static void vd56g3_update_controls(struct vd56g3 *sensor)
 		VD56G3_FRAME_LENGTH_MAX - sensor->active_crop.height;
 	unsigned int frame_length = sensor->active_crop.height + vblank;
 	unsigned int expo_max = frame_length - VD56G3_EXPOSURE_MARGIN;
+	int ret;
 
 	/* Update blanking and exposure (ranges + values) */
-	__v4l2_ctrl_modify_range(sensor->hblank_ctrl, hblank, hblank, 1,
-				 hblank);
-	__v4l2_ctrl_modify_range(sensor->vblank_ctrl, vblank_min, vblank_max, 1,
-				 vblank);
-	__v4l2_ctrl_s_ctrl(sensor->vblank_ctrl, vblank);
-	__v4l2_ctrl_modify_range(sensor->expo_ctrl, VD56G3_EXPOSURE_MIN,
-				 expo_max, 1, VD56G3_EXPOSURE_DEFAULT);
-	__v4l2_ctrl_s_ctrl(sensor->expo_ctrl, VD56G3_EXPOSURE_DEFAULT);
+	ret = __v4l2_ctrl_modify_range(sensor->hblank_ctrl, hblank, hblank, 1,
+				       hblank);
+	if (ret)
+		return ret;
+
+	ret = __v4l2_ctrl_modify_range(sensor->vblank_ctrl, vblank_min,
+				       vblank_max, 1, vblank);
+	if (ret)
+		return ret;
+
+	ret = __v4l2_ctrl_s_ctrl(sensor->vblank_ctrl, vblank);
+	if (ret)
+		return ret;
+
+	ret = __v4l2_ctrl_modify_range(sensor->expo_ctrl, VD56G3_EXPOSURE_MIN,
+				       expo_max, 1, VD56G3_EXPOSURE_DEFAULT);
+	if (ret)
+		return ret;
+
+	return __v4l2_ctrl_s_ctrl(sensor->expo_ctrl, VD56G3_EXPOSURE_DEFAULT);
 }
 
 static int vd56g3_init_controls(struct vd56g3 *sensor)
@@ -1695,10 +1713,11 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 		 * This nested 'if' only avoid to reset ctrls while format
 		 * hasn't changed (userspace pb, we shouldn't interfere ?)
 		 */
-		sensor->active_fmt = sd_fmt->format;
-		sensor->active_crop = pad_crop;
-
-		vd56g3_update_controls(sensor);
+		ret = vd56g3_update_controls(sensor);
+		if (!ret) {
+			sensor->active_fmt = sd_fmt->format;
+			sensor->active_crop = pad_crop;
+		}
 	}
 
 	mutex_unlock(&sensor->lock);
@@ -2364,9 +2383,7 @@ static int vd56g3_subdev_init(struct vd56g3 *sensor)
 	sensor->active_crop.left = 2;
 	sensor->active_crop.top = 2;
 
-	vd56g3_update_controls(sensor);
-
-	return 0;
+	return vd56g3_update_controls(sensor);
 
 err_media:
 	media_entity_cleanup(&sensor->sd.entity);
