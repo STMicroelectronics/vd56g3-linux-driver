@@ -1865,6 +1865,7 @@ static int vd56g3_power_on(struct vd56g3 *sensor)
 	}
 
 	gpiod_set_value_cansleep(sensor->reset_gpio, 0);
+	usleep_range(3500, 4000);
 	ret = vd56g3_wait_state(sensor, VD56G3_SYSTEM_FSM_READY_TO_BOOT, NULL);
 	if (ret) {
 		dev_err(&client->dev, "Sensor reset failed %d\n", ret);
