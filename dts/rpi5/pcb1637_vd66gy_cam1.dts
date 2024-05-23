@@ -38,7 +38,7 @@
 	};
 
 	fragment@1 {
-		target = <&i2c_csi_dsi>;
+		target = <&i2c_csi_dsi1>;
 		__overlay__ {
 			#address-cells = <1>;
 			#size-cells = <0>;
@@ -46,27 +46,27 @@
 
 			fox: fox@10 {
 				status = "ok";
-				compatible = "st,st-vd56g3";
+				compatible = "st,st-vd66gy";
 				reg = <0x10>;
 
 				clocks = <&camera_clk_12M>;
 				clock-names = "xclk";
 
-				VCORE-supply = <&v1v2>;
-				VDDIO-supply = <&v1v8>;
-				VANA-supply = <&v2v8>;
+				vcore-supply = <&v1v2>;
+				vddio-supply = <&v1v8>;
+				vana-supply = <&v2v8>;
 
 				reset-gpios = <&gpio 5 1>;
+				st,leds = <6>;
 
 				port {
 					fox_ep: endpoint {
 						clock-lanes = <0>;
 						data-lanes = <1 2>;
-						remote-endpoint = <&csi1_ep>;
+						remote-endpoint = <&csi_ep>;
 						clock-noncontinuous;
 						link-frequencies =
 							/bits/ 64 <402000000>;
-						lane-polarities = <1 1 1>;
 					};
 				};
 			};
@@ -75,11 +75,12 @@
 
 	fragment@2 {
 		target = <&csi1>;
-		__overlay__ {
+		csi: __overlay__ {
 			status = "okay";
+			brcm,media-controller;
 
 			port {
-				csi1_ep: endpoint {
+				csi_ep: endpoint {
 					remote-endpoint = <&fox_ep>;
 					clock-lanes = <0>;
 					data-lanes = <1 2>;
@@ -90,31 +91,18 @@
 	};
 
 	fragment@3 {
-		target = <&i2c0if>;
-		__overlay__ {
-			status = "okay";
-		};
-	};
-
-	fragment@4 {
-		target = <&i2c0mux>;
-		__overlay__ {
-			status = "okay";
-		};
-	};
-
-	fragment@5 {
 		target = <&cam1_reg>;
 		__overlay__ {
 			status = "disable";
 		};
 	};
 
-	fragment@6 {
+	fragment@4 {
 		target-path="/__overrides__";
 		__overlay__ {
-			cam0-pwdn-ctrl = <&fox>,"reset-gpios:0";
-			cam0-pwdn      = <&fox>,"reset-gpios:4";
+			cam1-pwdn-ctrl = <&fox>,"reset-gpios:0";
+			cam1-pwdn      = <&fox>,"reset-gpios:4";
+			media-controller = <&csi1>,"brcm,media-controller?";
 		};
 	};
 };

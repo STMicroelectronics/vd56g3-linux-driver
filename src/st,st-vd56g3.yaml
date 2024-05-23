@@ -13,11 +13,10 @@ maintainers:
 
 description: |-
   The STMicroelectronics VD56G3 is a 1.5 M pixel global shutter image sensor
-  with an active array size of 1124 x 1364 (portrait orientation).
-  It is programmable through I2C, the address is fixed to 0x10.
-  The sensor output is available via CSI-2, which is configured as either 1 or
-  2 data lanes.
-  The sensor provides 8 GPIOS that can be used for either
+  with an active array size of 1124 x 1364 (portrait orientation). It is
+  programmable through I2C, the address is fixed to 0x10. The sensor output is
+  available via CSI-2, which is configured as either 1 or 2 data lanes. The
+  sensor provides 8 GPIOS that can be used for either :
     - frame synchronization (Master: out-sync or Slave: in-sync)
     - external LED signal (synchronized with sensor integration periods)
 
@@ -36,13 +35,13 @@ properties:
   clocks:
     maxItems: 1
 
-  VCORE-supply:
+  vcore-supply:
     description: Digital core power supply (1.15V)
 
-  VDDIO-supply:
+  vddio-supply:
     description: Digital IO power supply (1.8V)
 
-  VANA-supply:
+  vana-supply:
     description: Analog power supply (2.8V)
 
   reset-gpios:
@@ -51,8 +50,8 @@ properties:
 
   st,leds:
     description:
-      Sensor's GPIOs used for external LED control.
-      Signal being the enveloppe of the integration time.
+      Sensor's GPIOs used for external LED control. Signal being the enveloppe
+      of the integration time.
     $ref: /schemas/types.yaml#/definitions/uint32-array
     minItems: 1
     maxItems: 8
@@ -62,8 +61,8 @@ properties:
 
   st,out-sync:
     description:
-      Sensor's GPIOs used to signal Start Of Frame.
-      Start Of Frame could be used to synchronize another camera.
+      Sensor's GPIOs used to signal Start Of Frame. Start Of Frame could be
+      used to synchronize another camera.
     $ref: /schemas/types.yaml#/definitions/uint32-array
     minItems: 1
     maxItems: 8
@@ -73,10 +72,9 @@ properties:
 
   st,in-sync:
     description:
-      Sensor's GPIO configured in Input mode.
-      While streaming, sensor will wait for input signal (an external
-      signal or another sensor with st,out-sync property configured).
-      Only GPIO0 support this start frame configuration.
+      Sensor's GPIO configured in Input mode. While streaming, sensor will wait
+      for input signal (an external signal or another sensor with st,out-sync
+      property configured). Only GPIO0 support this start frame configuration.
     $ref: /schemas/types.yaml#/definitions/uint32
     const: 0
 
@@ -89,9 +87,6 @@ properties:
         unevaluatedProperties: false
 
         properties:
-          clock-lanes:
-            const: 0
-
           data-lanes:
             minItems: 1
             maxItems: 2
@@ -107,12 +102,9 @@ properties:
           lane-polarities:
             minItems: 1
             maxItems: 3
-            items:
-              enum: [0, 1]
             description: Any lane can be inverted or not.
 
         required:
-          - clock-lanes
           - data-lanes
           - link-frequencies
 
@@ -120,9 +112,9 @@ required:
   - compatible
   - reg
   - clocks
-  - VCORE-supply
-  - VDDIO-supply
-  - VANA-supply
+  - vcore-supply
+  - vddio-supply
+  - vana-supply
   - reset-gpios
   - port
 
@@ -136,28 +128,25 @@ examples:
         #address-cells = <1>;
         #size-cells = <0>;
 
-        vd56g3: camera-sensor@10 {
+        camera-sensor@10 {
             compatible = "st,st-vd56g3";
             reg = <0x10>;
 
             clocks = <&camera_clk_12M>;
 
-            VCORE-supply = <&camera_vcore_v1v15>;
-            VDDIO-supply = <&camera_vddio_v1v8>;
-            VANA-supply = <&camera_vana_v2v8>;
+            vcore-supply = <&camera_vcore_v1v15>;
+            vddio-supply = <&camera_vddio_v1v8>;
+            vana-supply = <&camera_vana_v2v8>;
 
             reset-gpios = <&gpio 5 GPIO_ACTIVE_LOW>;
             st,leds = <6>;
 
             port {
-                vd56g3_ep: endpoint {
-                    clock-lanes = <0>;
+                endpoint {
                     data-lanes = <1 2>;
-                    link-frequencies =
-                      /bits/ 64 <402000000>;
+                    link-frequencies = /bits/ 64 <402000000>;
                     remote-endpoint = <&csiphy0_ep>;
                 };
             };
         };
     };
-...

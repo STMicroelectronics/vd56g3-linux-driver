@@ -46,18 +46,17 @@
 
 			fox: fox@10 {
 				status = "ok";
-				compatible = "st,st-vd56g3";
+				compatible = "st,st-vd66gy";
 				reg = <0x10>;
 
 				clocks = <&camera_clk_12M>;
 				clock-names = "xclk";
 
-				VCORE-supply = <&v1v2>;
-				VDDIO-supply = <&v1v8>;
-				VANA-supply = <&v2v8>;
+				vcore-supply = <&v1v2>;
+				vddio-supply = <&v1v8>;
+				vana-supply = <&v2v8>;
 
 				reset-gpios = <&gpio 5 1>;
-				st,leds = <6>;
 
 				port {
 					fox_ep: endpoint {
@@ -67,6 +66,7 @@
 						clock-noncontinuous;
 						link-frequencies =
 							/bits/ 64 <402000000>;
+						lane-polarities = <1 1 1>;
 					};
 				};
 			};

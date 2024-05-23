@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.0-rc2] - 2024-05-22
+- Ensure sensor has dedicated 3.5ms to boot after reset
+- dt-bindings : Update naming to fit mass-market
+- Improve code quality after upstream V1 review
+
 ## [1.0.0-rc1] - 2024-04-17
 - dt-bindings : convert text bindings to yaml format
 - Binning mode and Crop are computed dynamically (instead of hardcoded)
