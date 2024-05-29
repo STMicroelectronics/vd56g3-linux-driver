@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.0.1] - 2024-05-29
+- Update Readme to fit with latest RPI-OS
+
 ## [1.0.0-rc2] - 2024-05-22
 - Ensure sensor has dedicated 3.5ms to boot after reset
 - dt-bindings : Update naming to fit mass-market
