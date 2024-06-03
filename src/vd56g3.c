@@ -250,8 +250,8 @@ int pm_runtime_get_if_in_use(struct device *dev)
 #endif
 /* parse-SNAP: */
 
-#include "st-vd56g3_patch_cut2.c"
-#include "st-vd56g3_vtpatch.c"
+#include "vd56g3_patch_cut2.c"
+#include "vd56g3_vtpatch.c"
 
 /* regulator supplies */
 static const char *const vd56g3_supply_names[] = {
@@ -2220,8 +2220,8 @@ static int vd56g3_prepare_clock_tree(struct vd56g3 *sensor)
 
 #if KERNEL_VERSION(4, 16, 0) > LINUX_VERSION_CODE
 static const struct of_device_id vd56g3_dt_ids[] = {
-	{ .compatible = "st,st-vd56g3", .data = (void *)VD56G3_MODEL_VD56G3 },
-	{ .compatible = "st,st-vd66gy", .data = (void *)VD56G3_MODEL_VD66GY },
+	{ .compatible = "st,vd56g3", .data = (void *)VD56G3_MODEL_VD56G3 },
+	{ .compatible = "st,vd66gy", .data = (void *)VD56G3_MODEL_VD66GY },
 	{ /* sentinel */ }
 };
 #endif
@@ -2480,8 +2480,8 @@ static void vd56g3_remove(struct i2c_client *client)
 
 #if KERNEL_VERSION(4, 16, 0) <= LINUX_VERSION_CODE
 static const struct of_device_id vd56g3_dt_ids[] = {
-	{ .compatible = "st,st-vd56g3", .data = (void *)VD56G3_MODEL_VD56G3 },
-	{ .compatible = "st,st-vd66gy", .data = (void *)VD56G3_MODEL_VD66GY },
+	{ .compatible = "st,vd56g3", .data = (void *)VD56G3_MODEL_VD56G3 },
+	{ .compatible = "st,vd66gy", .data = (void *)VD56G3_MODEL_VD66GY },
 	{ /* sentinel */ }
 };
 #endif
@@ -2489,7 +2489,7 @@ MODULE_DEVICE_TABLE(of, vd56g3_dt_ids);
 
 static struct i2c_driver vd56g3_i2c_driver = {
 	.driver = {
-		.name  = "st-vd56g3",
+		.name  = "vd56g3",
 		.of_match_table = vd56g3_dt_ids,
 		.pm = &vd56g3_pm_ops,
 	},

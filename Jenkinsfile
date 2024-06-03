@@ -79,13 +79,13 @@ pipeline {
 							spec: '''{
 								"files": [
 									{
-										"pattern": "st-vd56g3*.deb",
-										"target": "imgswlinux-debian-local/pool/st-vd56g3-dkms/stable/",
+										"pattern": "vd56g3*.deb",
+										"target": "imgswlinux-debian-local/pool/vd56g3-dkms/stable/",
 										"props": "deb.distribution=stable;deb.component=main;deb.architecture=armhf;deb.architecture=arm64"
 									},
 									{
-										"pattern": "st-vd56g3*.zip",
-										"target": "imgswlinux-releases-imgappswlinux-codex-st-com/drivers/st-vd56g3/stable/"
+										"pattern": "vd56g3*.zip",
+										"target": "imgswlinux-releases-imgappswlinux-codex-st-com/drivers/vd56g3/stable/"
 									}
 								]
 							}'''
@@ -96,13 +96,13 @@ pipeline {
 							spec: '''{
 								"files": [
 									{
-										"pattern": "st-vd56g3*.deb",
-										"target": "imgswlinux-debian-local/pool/st-vd56g3-dkms/unstable/",
+										"pattern": "vd56g3*.deb",
+										"target": "imgswlinux-debian-local/pool/vd56g3-dkms/unstable/",
 										"props": "deb.distribution=unstable;deb.component=main;deb.architecture=armhf;deb.architecture=arm64"
 									},
 									{
-										"pattern": "st-vd56g3*.zip",
-										"target": "imgswlinux-releases-imgappswlinux-codex-st-com/drivers/st-vd56g3/unstable/"
+										"pattern": "vd56g3*.zip",
+										"target": "imgswlinux-releases-imgappswlinux-codex-st-com/drivers/vd56g3/unstable/"
 									}
 								]
 							}'''
@@ -116,7 +116,7 @@ pipeline {
 	post {
 		always {
 			// Remove debian packaging stuff
-			sh 'find . -maxdepth 1 -type f -name "st-vd56g3*" -exec rm -v "{}" \\;'
+			sh 'find . -maxdepth 1 -type f -name "vd56g3*" -exec rm -v "{}" \\;'
 
 			// Send mail
 			emailext (
