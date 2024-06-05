@@ -46,7 +46,7 @@
 
 			fox: fox@10 {
 				status = "ok";
-				compatible = "st,st-vd56g3";
+				compatible = "st,vd56g3";
 				reg = <0x10>;
 
 				clocks = <&camera_clk_12M>;

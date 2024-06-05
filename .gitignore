@@ -56,10 +56,10 @@ Module.symvers
 debian/debhelper-build-stamp
 debian/files
 debian/.debhelper/
-debian/st-vd56g3-dkms*
+debian/vd56g3-dkms*
 debianizer/
 # Allow
-!debian/st-vd56g3-dkms.dkms
+!debian/vd56g3-dkms.dkms
 
 #
 # git files that we don't want to ignore even it they are dot-files
@@ -105,4 +105,4 @@ signing_key.x509
 x509.genkey
 
 tmp
-st-vd56g3.mod
+vd56g3.mod

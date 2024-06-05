@@ -7,7 +7,7 @@ The VD56G3 linux driver support both :
     - VD56G3 - Monochrome version
     - VD66GY - RGB Bayer version
 
-The connected camera must be declared accordingly in device tree through the ``compatible`` property : ``st,st-vd56g3`` for Mono version and ``st,st-vd66gy`` for RGB version.
+The connected camera must be declared accordingly in device tree through the ``compatible`` property : ``st,vd56g3`` for Mono version and ``st,vd66gy`` for RGB version.
 Additionnal checks are runs during driver's ``probe`` to ensure that the right sensor is detected.
 
 Since v0.11, the linux driver support both :
@@ -18,7 +18,7 @@ Since v0.11, the linux driver support both :
 
 Supported Modes
 ===============
-.. kernel-doc:: ./../src/st-vd56g3.c
+.. kernel-doc:: ./../src/vd56g3.c
     :doc: Supported Modes
     :no-header:
 
@@ -90,21 +90,21 @@ Custom Controls IDs
 
 In order to be able to programmatically interact with these VD56G3-custom controls, their IDs definition are reproduced below.
 
-.. kernel-doc::  ./../src/st-vd56g3.c
+.. kernel-doc::  ./../src/vd56g3.c
    :snippets:  Custom-CIDs
    :language:  c
 
 Custom Controls Definitions
 ---------------------------
-.. kernel-doc:: ./../src/st-vd56g3.c
+.. kernel-doc:: ./../src/vd56g3.c
     :doc: Temperature Control
-.. kernel-doc:: ./../src/st-vd56g3.c
+.. kernel-doc:: ./../src/vd56g3.c
     :doc: AE - Light level target (%)
-.. kernel-doc:: ./../src/st-vd56g3.c
+.. kernel-doc:: ./../src/vd56g3.c
     :doc: AE - Convergence step proportion
-.. kernel-doc:: ./../src/st-vd56g3.c
+.. kernel-doc:: ./../src/vd56g3.c
     :doc: AE - Convergence leak proportion
-.. kernel-doc:: ./../src/st-vd56g3.c
+.. kernel-doc:: ./../src/vd56g3.c
     :doc: Dark Calibration Pedestal
-.. kernel-doc:: ./../src/st-vd56g3.c
+.. kernel-doc:: ./../src/vd56g3.c
     :doc: VT Slave Mode Control

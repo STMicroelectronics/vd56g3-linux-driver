@@ -26,7 +26,7 @@
 /* Backward compatibility */
 #include <linux/version.h>
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 8, 0)
+#if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
 /*
  * Warning : CCI_REGxy_LE definitions doesn't fit exactly with v4l2-cci.h .
  * In fact endianness is managed directly in vd56g3_read/write() functions.
@@ -42,21 +42,21 @@
 #include <media/v4l2-cci.h>
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 18, 0)
+#if KERNEL_VERSION(5, 18, 0) > LINUX_VERSION_CODE
 #define MIPI_CSI2_DT_RAW8	0x2a
 #define MIPI_CSI2_DT_RAW10	0x2b
 #else
 #include <media/mipi-csi2.h>
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0)
+#if KERNEL_VERSION(5, 15, 0) > LINUX_VERSION_CODE
 #define HZ_PER_MHZ		1000000UL
 #define MEGA			1000000UL
 #else
 #include <linux/units.h>
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 9, 0)
+#if KERNEL_VERSION(5, 9, 0) > LINUX_VERSION_CODE
 int dev_err_probe(const struct device *dev, int err, const char *fmt, ...)
 {
 	struct va_format vaf;
@@ -77,11 +77,11 @@ int dev_err_probe(const struct device *dev, int err, const char *fmt, ...)
 }
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 16, 0)
+#if KERNEL_VERSION(4, 16, 0) > LINUX_VERSION_CODE
 #include <linux/of_device.h>
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 5, 0)
+#if KERNEL_VERSION(4, 5, 0) > LINUX_VERSION_CODE
 int pm_runtime_get_if_in_use(struct device *dev)
 {
 	unsigned long flags;
@@ -245,13 +245,13 @@ int pm_runtime_get_if_in_use(struct device *dev)
 #define V4L2_CID_AE_LEAK_PROPORTION		(V4L2_CID_USER_BASE | 0x1023)
 #define V4L2_CID_DARKCAL_PEDESTAL		(V4L2_CID_USER_BASE | 0x1024)
 #define V4L2_CID_SLAVE_MODE			(V4L2_CID_USER_BASE | 0x1025)
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 13, 0)
+#if KERNEL_VERSION(4, 13, 0) > LINUX_VERSION_CODE
 #define V4L2_CID_DIGITAL_GAIN			(V4L2_CID_USER_BASE | 0x1026)
 #endif
 /* parse-SNAP: */
 
-#include "st-vd56g3_patch_cut2.c"
-#include "st-vd56g3_vtpatch.c"
+#include "vd56g3_patch_cut2.c"
+#include "vd56g3_vtpatch.c"
 
 /* regulator supplies */
 static const char *const vd56g3_supply_names[] = {
@@ -362,7 +362,7 @@ static const unsigned int vd56g3_mbus_codes[2][5] = {
 	},
 };
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 8, 0)
+#if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
 /* Big endian register addresses and 8b, 16b or 32b little endian values. */
 static const struct regmap_config vd56g3_regmap_config = {
 	.reg_bits = 16,
@@ -426,7 +426,7 @@ struct vd56g3 {
 
 static inline struct vd56g3 *to_vd56g3(struct v4l2_subdev *sd)
 {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 2, 0)
+#if KERNEL_VERSION(6, 2, 0) > LINUX_VERSION_CODE
 	return container_of(sd, struct vd56g3, sd);
 #else
 	return container_of_const(sd, struct vd56g3, sd);
@@ -435,7 +435,7 @@ static inline struct vd56g3 *to_vd56g3(struct v4l2_subdev *sd)
 
 static inline struct v4l2_subdev *ctrl_to_sd(struct v4l2_ctrl *ctrl)
 {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 2, 0)
+#if KERNEL_VERSION(6, 2, 0) > LINUX_VERSION_CODE
 	return &container_of(ctrl->handler, struct vd56g3, ctrl_handler)->sd;
 #else
 	return &container_of_const(ctrl->handler, struct vd56g3, ctrl_handler)
@@ -447,7 +447,7 @@ static inline struct v4l2_subdev *ctrl_to_sd(struct v4l2_ctrl *ctrl)
  * HW access : Big endian reg addresses and 8b, 16b or 32b little endian values
  */
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 8, 0)
+#if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
 static int vd56g3_read(struct vd56g3 *sensor, u32 reg, u32 *val, int *err)
 {
 	struct i2c_client *client = sensor->i2c_client;
@@ -866,7 +866,7 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	case V4L2_CID_EXPOSURE_AUTO:
 		is_auto = (ctrl->val == V4L2_EXPOSURE_AUTO);
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 20, 0)
+#if KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE
 		mutex_unlock(&sensor->lock);
 		v4l2_ctrl_grab(sensor->ae_lock_ctrl, !is_auto);
 		v4l2_ctrl_grab(sensor->ae_bias_ctrl, !is_auto);
@@ -1112,7 +1112,7 @@ static const struct v4l2_ctrl_config vd56g3_slave_ctrl = {
 	.def = 1,
 };
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 13, 0)
+#if KERNEL_VERSION(4, 13, 0) > LINUX_VERSION_CODE
 /**
  * DOC: Digital Gain Control
  *
@@ -1173,14 +1173,14 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 	/* Horizontal & vertical flips modify bayer code on RGB variant */
 	sensor->hflip_ctrl =
 		v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HFLIP, 0, 1, 1, 0);
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0)
+#if KERNEL_VERSION(4, 12, 0) > LINUX_VERSION_CODE
 #else
 	if (sensor->hflip_ctrl)
 		sensor->hflip_ctrl->flags |= V4L2_CTRL_FLAG_MODIFY_LAYOUT;
 #endif
 	sensor->vflip_ctrl =
 		v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VFLIP, 0, 1, 1, 0);
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0)
+#if KERNEL_VERSION(4, 12, 0) > LINUX_VERSION_CODE
 #else
 	if (sensor->vflip_ctrl)
 		sensor->vflip_ctrl->flags |= V4L2_CTRL_FLAG_MODIFY_LAYOUT;
@@ -1226,7 +1226,7 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 	 */
 	sensor->again_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_ANALOGUE_GAIN,
 					       0, 28, 1, 0);
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 13, 0)
+#if KERNEL_VERSION(4, 13, 0) > LINUX_VERSION_CODE
 	sensor->dgain_ctrl =
 		v4l2_ctrl_new_custom(hdl, &vd56g3_dgain_ctrl, NULL);
 #else
@@ -1356,7 +1356,7 @@ static int vd56g3_stream_on(struct vd56g3 *sensor)
 		return ret;
 
 	/* Apply settings from V4L2 ctrls */
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 13, 0)
+#if KERNEL_VERSION(4, 13, 0) > LINUX_VERSION_CODE
 	mutex_unlock(&sensor->lock);
 	ret = v4l2_ctrl_handler_setup(&sensor->ctrl_handler);
 	mutex_lock(&sensor->lock);
@@ -1398,7 +1398,7 @@ static int vd56g3_s_stream(struct v4l2_subdev *sd, int enable)
 	mutex_lock(&sensor->lock);
 
 	if (enable) {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0)
+#if KERNEL_VERSION(5, 10, 0) > LINUX_VERSION_CODE
 		ret = pm_runtime_get_sync(&client->dev);
 		if (ret < 0) {
 			pm_runtime_put_noidle(&client->dev);
@@ -1420,7 +1420,7 @@ static int vd56g3_s_stream(struct v4l2_subdev *sd, int enable)
 		pm_runtime_put_autosuspend(&client->dev);
 	}
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 20, 0)
+#if KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE
 	if (!ret)
 		sensor->streaming = enable;
 
@@ -1492,13 +1492,15 @@ endloops:
 	return vd56g3_mbus_codes[i_bpp][j];
 }
 
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 static int vd56g3_enum_mbus_code(struct v4l2_subdev *sd,
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
 				 struct v4l2_subdev_pad_config *cfg,
-#else
-				 struct v4l2_subdev_state *sd_state,
-#endif
 				 struct v4l2_subdev_mbus_code_enum *code)
+#else
+static int vd56g3_enum_mbus_code(struct v4l2_subdev *sd,
+				 struct v4l2_subdev_state *sd_state,
+				 struct v4l2_subdev_mbus_code_enum *code)
+#endif
 {
 	struct vd56g3 *sensor = to_vd56g3(sd);
 
@@ -1511,13 +1513,15 @@ static int vd56g3_enum_mbus_code(struct v4l2_subdev *sd,
 	return 0;
 }
 
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 static int vd56g3_enum_frame_size(struct v4l2_subdev *sd,
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
 				  struct v4l2_subdev_pad_config *cfg,
-#else
-				  struct v4l2_subdev_state *sd_state,
-#endif
 				  struct v4l2_subdev_frame_size_enum *fse)
+#else
+static int vd56g3_enum_frame_size(struct v4l2_subdev *sd,
+				  struct v4l2_subdev_state *sd_state,
+				  struct v4l2_subdev_frame_size_enum *fse)
+#endif
 {
 	if (fse->index >= ARRAY_SIZE(vd56g3_supported_modes))
 		return -EINVAL;
@@ -1545,13 +1549,15 @@ static void vd56g3_update_img_pad_format(struct vd56g3 *sensor,
 	mbus_fmt->xfer_func = V4L2_XFER_FUNC_NONE;
 }
 
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 static int vd56g3_get_pad_fmt(struct v4l2_subdev *sd,
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
 			      struct v4l2_subdev_pad_config *cfg,
-#else
-			      struct v4l2_subdev_state *sd_state,
-#endif
 			      struct v4l2_subdev_format *sd_fmt)
+#else
+static int vd56g3_get_pad_fmt(struct v4l2_subdev *sd,
+			      struct v4l2_subdev_state *sd_state,
+			      struct v4l2_subdev_format *sd_fmt)
+#endif
 {
 	struct vd56g3 *sensor = to_vd56g3(sd);
 	struct v4l2_mbus_framefmt *pad_fmt;
@@ -1559,10 +1565,10 @@ static int vd56g3_get_pad_fmt(struct v4l2_subdev *sd,
 	mutex_lock(&sensor->lock);
 
 	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 		pad_fmt = v4l2_subdev_get_try_format(&sensor->sd, cfg,
 						     sd_fmt->pad);
-#elif LINUX_VERSION_CODE < KERNEL_VERSION(5, 19, 0)
+#elif KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE
 		pad_fmt = v4l2_subdev_get_try_format(&sensor->sd, sd_state,
 						     sd_fmt->pad);
 #else
@@ -1581,7 +1587,7 @@ static int vd56g3_get_pad_fmt(struct v4l2_subdev *sd,
 	return 0;
 }
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 17, 0)
+#if KERNEL_VERSION(4, 17, 0) > LINUX_VERSION_CODE
 static const struct vd56g3_mode *
 vd56g3_find_nearest_size(struct v4l2_mbus_framefmt *fmt)
 {
@@ -1601,13 +1607,15 @@ vd56g3_find_nearest_size(struct v4l2_mbus_framefmt *fmt)
 }
 #endif
 
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
 			      struct v4l2_subdev_pad_config *cfg,
-#else
-			      struct v4l2_subdev_state *sd_state,
-#endif
 			      struct v4l2_subdev_format *sd_fmt)
+#else
+static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
+			      struct v4l2_subdev_state *sd_state,
+			      struct v4l2_subdev_format *sd_fmt)
+#endif
 {
 	struct vd56g3 *sensor = to_vd56g3(sd);
 	const struct vd56g3_mode *new_mode;
@@ -1622,7 +1630,7 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 	mutex_lock(&sensor->lock);
 
 	/* Identify the mode that best suits the requested resolution */
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 17, 0)
+#if KERNEL_VERSION(4, 17, 0) > LINUX_VERSION_CODE
 	new_mode = vd56g3_find_nearest_size(&sd_fmt->format);
 #else
 	new_mode = v4l2_find_nearest_size(vd56g3_supported_modes,
@@ -1644,9 +1652,9 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 	pad_crop.top = (VD56G3_NATIVE_HEIGHT - pad_crop.height) / 2;
 
 	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 		pad_fmt = v4l2_subdev_get_try_format(sd, cfg, sd_fmt->pad);
-#elif LINUX_VERSION_CODE < KERNEL_VERSION(5, 19, 0)
+#elif KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE
 		pad_fmt = v4l2_subdev_get_try_format(sd, sd_state, sd_fmt->pad);
 #else
 		pad_fmt = v4l2_subdev_get_pad_format(sd, sd_state, sd_fmt->pad);
@@ -1670,13 +1678,15 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 	return ret;
 }
 
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 static int vd56g3_get_selection(struct v4l2_subdev *sd,
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
 				struct v4l2_subdev_pad_config *cfg,
-#else
-				struct v4l2_subdev_state *sd_state,
-#endif
 				struct v4l2_subdev_selection *sel)
+#else
+static int vd56g3_get_selection(struct v4l2_subdev *sd,
+				struct v4l2_subdev_state *sd_state,
+				struct v4l2_subdev_selection *sel)
+#endif
 {
 	struct vd56g3 *sensor = to_vd56g3(sd);
 
@@ -1699,21 +1709,22 @@ static int vd56g3_get_selection(struct v4l2_subdev *sd,
 	return 0;
 }
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 7, 0)
+#if KERNEL_VERSION(4, 7, 0) > LINUX_VERSION_CODE
 #else
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 static int vd56g3_init_cfg(struct v4l2_subdev *sd,
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
 			   struct v4l2_subdev_pad_config *cfg)
 #else
+static int vd56g3_init_cfg(struct v4l2_subdev *sd,
 			   struct v4l2_subdev_state *sd_state)
 #endif
 {
 	struct vd56g3 *sensor = to_vd56g3(sd);
 	unsigned int def_mode = VD56G3_DEFAULT_MODE;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 	struct v4l2_mbus_framefmt *img_pad_fmt =
 		v4l2_subdev_get_try_format(sd, cfg, 0);
-#elif LINUX_VERSION_CODE < KERNEL_VERSION(5, 19, 0)
+#elif KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE
 	struct v4l2_mbus_framefmt *img_pad_fmt =
 		v4l2_subdev_get_try_format(sd, sd_state, 0);
 #else
@@ -1734,7 +1745,7 @@ static const struct v4l2_subdev_core_ops vd56g3_core_ops = {
 };
 
 static const struct v4l2_subdev_pad_ops vd56g3_pad_ops = {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 7, 0)
+#if KERNEL_VERSION(4, 7, 0) > LINUX_VERSION_CODE
 #else
 	.init_cfg = vd56g3_init_cfg,
 #endif
@@ -1955,7 +1966,7 @@ static int vd56g3_check_csi_conf(struct vd56g3 *sensor,
 				 struct fwnode_handle *endpoint)
 {
 	struct i2c_client *client = sensor->i2c_client;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 20, 0)
+#if KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE
 	struct v4l2_fwnode_endpoint ep = { .bus_type = V4L2_MBUS_CSI2 };
 #else
 	struct v4l2_fwnode_endpoint ep = { .bus_type = V4L2_MBUS_CSI2_DPHY };
@@ -1966,7 +1977,7 @@ static int vd56g3_check_csi_conf(struct vd56g3 *sensor,
 	int p, l;
 	int ret = 0;
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 20, 0)
+#if KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE
 	struct v4l2_fwnode_endpoint *ep_ptr =
 		v4l2_fwnode_endpoint_alloc_parse(endpoint);
 	if (IS_ERR(ep_ptr))
@@ -2029,7 +2040,7 @@ static int vd56g3_check_csi_conf(struct vd56g3 *sensor,
 	}
 
 done:
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 20, 0)
+#if KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE
 	v4l2_fwnode_endpoint_free(ep_ptr);
 #else
 	v4l2_fwnode_endpoint_free(&ep);
@@ -2140,7 +2151,7 @@ static int vd56g3_parse_dt(struct vd56g3 *sensor)
 	struct fwnode_handle *endpoint;
 	int ret;
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 2, 0)
+#if KERNEL_VERSION(5, 2, 0) > LINUX_VERSION_CODE
 	endpoint =
 		fwnode_graph_get_next_endpoint(of_fwnode_handle(dev->of_node),
 					       NULL);
@@ -2207,10 +2218,10 @@ static int vd56g3_prepare_clock_tree(struct vd56g3 *sensor)
 	return 0;
 }
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 16, 0)
+#if KERNEL_VERSION(4, 16, 0) > LINUX_VERSION_CODE
 static const struct of_device_id vd56g3_dt_ids[] = {
-	{ .compatible = "st,st-vd56g3", .data = (void *)VD56G3_MODEL_VD56G3 },
-	{ .compatible = "st,st-vd66gy", .data = (void *)VD56G3_MODEL_VD66GY },
+	{ .compatible = "st,vd56g3", .data = (void *)VD56G3_MODEL_VD56G3 },
+	{ .compatible = "st,vd66gy", .data = (void *)VD56G3_MODEL_VD66GY },
 	{ /* sentinel */ }
 };
 #endif
@@ -2225,7 +2236,7 @@ static int vd56g3_detect(struct vd56g3 *sensor)
 	int optical_revision = 0;
 	int ret = 0;
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 16, 0)
+#if KERNEL_VERSION(4, 16, 0) > LINUX_VERSION_CODE
 	const struct of_device_id *dt_ids;
 
 	dt_ids = of_match_device(of_match_ptr(vd56g3_dt_ids), dev);
@@ -2293,7 +2304,7 @@ static int vd56g3_subdev_init(struct vd56g3 *sensor)
 
 	/* Init source pad */
 	sensor->pad.flags = MEDIA_PAD_FL_SOURCE;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 5, 0)
+#if KERNEL_VERSION(4, 5, 0) > LINUX_VERSION_CODE
 	sensor->sd.entity.type = MEDIA_ENT_T_V4L2_SUBDEV_SENSOR;
 	ret = media_entity_init(&sensor->sd.entity, 1, &sensor->pad, 0);
 #else
@@ -2339,7 +2350,7 @@ static void vd56g3_subdev_cleanup(struct vd56g3 *sensor)
 	v4l2_ctrl_handler_free(sensor->sd.ctrl_handler);
 }
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0)
+#if KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE
 static int vd56g3_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
 #else
@@ -2380,7 +2391,7 @@ static int vd56g3_probe(struct i2c_client *client)
 		return dev_err_probe(dev, PTR_ERR(sensor->reset_gpio),
 				     "Failed to get reset gpio.");
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 8, 0)
+#if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
 	sensor->regmap = devm_regmap_init_i2c(client, &vd56g3_regmap_config);
 #else
 	sensor->regmap = devm_cci_regmap_init_i2c(client, 16);
@@ -2447,7 +2458,7 @@ err_power_off:
 	return ret;
 }
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
+#if KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE
 static int vd56g3_remove(struct i2c_client *client)
 #else
 static void vd56g3_remove(struct i2c_client *client)
@@ -2462,15 +2473,15 @@ static void vd56g3_remove(struct i2c_client *client)
 	if (!pm_runtime_status_suspended(&client->dev))
 		vd56g3_power_off(sensor);
 	pm_runtime_set_suspended(&client->dev);
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
+#if KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE
 	return 0;
 #endif
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 16, 0)
+#if KERNEL_VERSION(4, 16, 0) <= LINUX_VERSION_CODE
 static const struct of_device_id vd56g3_dt_ids[] = {
-	{ .compatible = "st,st-vd56g3", .data = (void *)VD56G3_MODEL_VD56G3 },
-	{ .compatible = "st,st-vd66gy", .data = (void *)VD56G3_MODEL_VD66GY },
+	{ .compatible = "st,vd56g3", .data = (void *)VD56G3_MODEL_VD56G3 },
+	{ .compatible = "st,vd66gy", .data = (void *)VD56G3_MODEL_VD66GY },
 	{ /* sentinel */ }
 };
 #endif
@@ -2478,13 +2489,13 @@ MODULE_DEVICE_TABLE(of, vd56g3_dt_ids);
 
 static struct i2c_driver vd56g3_i2c_driver = {
 	.driver = {
-		.name  = "st-vd56g3",
+		.name  = "vd56g3",
 		.of_match_table = vd56g3_dt_ids,
 		.pm = &vd56g3_pm_ops,
 	},
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0)
+#if KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE
 	.probe = vd56g3_probe,
-#elif LINUX_VERSION_CODE < KERNEL_VERSION(6, 3, 0)
+#elif KERNEL_VERSION(6, 3, 0) > LINUX_VERSION_CODE
 	.probe_new = vd56g3_probe,
 #else
 	.probe = vd56g3_probe,
