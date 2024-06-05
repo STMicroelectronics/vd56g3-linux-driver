@@ -1,3 +1,11 @@
+vd56g3-dkms (1.0.2-1) unstable; urgency=medium
+
+  * New upstream release
+  * Update debian/rules to reflect new driver name
+  * Update package name
+
+ -- Sylvain Petinot <sylvain.petinot@st.com>  Wed, 05 Jun 2024 10:43:58 +0200
+
 st-vd56g3-dkms (1.0.1-1) unstable; urgency=medium
 
   * New upstream release
@@ -67,7 +75,7 @@ st-vd56g3-dkms (0.4-1) unstable; urgency=medium
 
 st-vd56g3-dkms (0.4.0) buster; urgency=medium
 
-  * Switch to 1.33 patch 
+  * Switch to 1.33 patch
 
  -- Mickael Guene <mickael.guene@st.com>  Fri, 13 Dec 2019 13:04:29 +0100
 
@@ -83,7 +91,7 @@ st-vd56g3-dkms (0.3.0) buster; urgency=medium
 st-vd56g3-dkms (0.2.0) buster; urgency=medium
 
   * Fix bad READOUT_CTRL address in documentation
-  * add 50 fps support 
+  * add 50 fps support
 
  -- Mickael Guene <mickael.guene@st.com>  Thu, 17 Oct 2019 11:23:01 +0200
 
