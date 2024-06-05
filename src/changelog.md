@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.0.2] - 2024-06-05
+- Follow rules and convention for driver/bindinfs naming
+
 ## [1.0.1] - 2024-05-29
 - Update Readme to fit with latest RPI-OS
 
