@@ -225,6 +225,7 @@ int pm_runtime_get_if_in_use(struct device *dev)
 #define VD56G3_LINE_LENGTH_MIN				1236
 #define VD56G3_VBLANK_MIN				110
 #define VD56G3_FRAME_LENGTH_DEF_60FPS			2168
+#define VD56G3_FRAME_LENGTH_MAX				0xffff
 
 /* Exposure settings */
 #define VD56G3_EXPOSURE_MARGIN				75
@@ -777,12 +778,12 @@ static int vd56g3_lock_exposure(struct vd56g3 *sensor, u32 lock_val)
 	bool ae_lock = lock_val & V4L2_LOCK_EXPOSURE;
 	enum vd56g3_expo_state expo_state = ae_lock ? VD56G3_EXP_MODE_FREEZE :
 						      VD56G3_EXP_MODE_AUTO;
-	int ret = 0;
 
 	if (sensor->ae_ctrl->val == V4L2_EXPOSURE_AUTO)
-		vd56g3_write(sensor, VD56G3_REG_EXP_MODE, expo_state, &ret);
+		return vd56g3_write(sensor, VD56G3_REG_EXP_MODE, expo_state,
+				    NULL);
 
-	return ret;
+	return 0;
 }
 
 static int vd56g3_write_gpiox(struct vd56g3 *sensor, unsigned long gpio_mask)
@@ -1151,7 +1152,8 @@ static void vd56g3_update_controls(struct vd56g3 *sensor)
 	unsigned int vblank_min = VD56G3_VBLANK_MIN;
 	unsigned int vblank =
 		VD56G3_FRAME_LENGTH_DEF_60FPS - sensor->active_crop.height;
-	unsigned int vblank_max = 0xffff - sensor->active_crop.height;
+	unsigned int vblank_max =
+		VD56G3_FRAME_LENGTH_MAX - sensor->active_crop.height;
 	unsigned int frame_length = sensor->active_crop.height + vblank;
 	unsigned int expo_max = frame_length - VD56G3_EXPOSURE_MARGIN;
 
@@ -2261,7 +2263,7 @@ static int vd56g3_detect(struct vd56g3 *sensor)
 	model = (uintptr_t)device_get_match_data(dev);
 #endif
 
-	vd56g3_read(sensor, VD56G3_REG_MODEL_ID, &model_id, &ret);
+	ret = vd56g3_read(sensor, VD56G3_REG_MODEL_ID, &model_id, NULL);
 	if (ret)
 		return ret;
 
@@ -2270,7 +2272,7 @@ static int vd56g3_detect(struct vd56g3 *sensor)
 		return -ENODEV;
 	}
 
-	vd56g3_read(sensor, VD56G3_REG_REVISION, &device_revision, &ret);
+	ret = vd56g3_read(sensor, VD56G3_REG_REVISION, &device_revision, NULL);
 	if (ret)
 		return ret;
 
@@ -2284,8 +2286,8 @@ static int vd56g3_detect(struct vd56g3 *sensor)
 		return -ENODEV;
 	}
 
-	vd56g3_read(sensor, VD56G3_REG_OPTICAL_REVISION, &optical_revision,
-		    &ret);
+	ret = vd56g3_read(sensor, VD56G3_REG_OPTICAL_REVISION,
+			  &optical_revision, NULL);
 	if (ret)
 		return ret;
 
