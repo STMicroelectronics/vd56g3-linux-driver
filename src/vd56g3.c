@@ -1747,6 +1747,7 @@ static int vd56g3_init_cfg(struct v4l2_subdev *sd,
 	/* Default resolution mode / raw8 */
 	vd56g3_update_img_pad_format(sensor, &vd56g3_supported_modes[def_mode],
 				     vd56g3_mbus_codes[0][0], img_pad_fmt);
+
 	return 0;
 }
 #endif
@@ -1947,6 +1948,7 @@ static int vd56g3_power_off(struct vd56g3 *sensor)
 	clk_disable_unprepare(sensor->xclk);
 	gpiod_set_value_cansleep(sensor->reset_gpio, 1);
 	regulator_bulk_disable(ARRAY_SIZE(sensor->supplies), sensor->supplies);
+
 	return 0;
 }
 
@@ -2017,7 +2019,8 @@ static int vd56g3_check_csi_conf(struct vd56g3 *sensor,
 		goto done;
 	}
 
-	/* Prepare Output Interface conf based on lane settings
+	/*
+	 * Prepare Output Interface conf based on lane settings
 	 * logical to physical lane conversion (+ pad remaining slots)
 	 */
 	for (l = 0; l < n_lanes; l++)
@@ -2351,6 +2354,7 @@ static int vd56g3_subdev_init(struct vd56g3 *sensor)
 
 err_media:
 	media_entity_cleanup(&sensor->sd.entity);
+
 	return ret;
 }
 
@@ -2471,6 +2475,7 @@ err_power_off:
 	pm_runtime_disable(dev);
 	pm_runtime_put_noidle(dev);
 	vd56g3_power_off(sensor);
+
 	return ret;
 }
 
@@ -2490,6 +2495,7 @@ static void vd56g3_remove(struct i2c_client *client)
 		vd56g3_power_off(sensor);
 	pm_runtime_set_suspended(&client->dev);
 #if KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE
+
 	return 0;
 #endif
 }
