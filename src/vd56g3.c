@@ -229,6 +229,7 @@ int pm_runtime_get_if_in_use(struct device *dev)
 
 /* Exposure settings */
 #define VD56G3_EXPOSURE_MARGIN				75
+#define VD56G3_EXPOSURE_MIN				21
 #define VD56G3_EXPOSURE_DEFAULT				1420
 
 /* Output Interface settings */
@@ -866,8 +867,8 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_VBLANK:
 		frame_length = sensor->active_crop.height + ctrl->val;
 		expo_max = frame_length - VD56G3_EXPOSURE_MARGIN;
-		__v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max, 1,
-					 VD56G3_EXPOSURE_DEFAULT);
+		__v4l2_ctrl_modify_range(sensor->expo_ctrl, VD56G3_EXPOSURE_MIN,
+					 expo_max, 1, VD56G3_EXPOSURE_DEFAULT);
 		break;
 	case V4L2_CID_EXPOSURE_AUTO:
 		is_auto = (ctrl->val == V4L2_EXPOSURE_AUTO);
@@ -1163,8 +1164,8 @@ static void vd56g3_update_controls(struct vd56g3 *sensor)
 	__v4l2_ctrl_modify_range(sensor->vblank_ctrl, vblank_min, vblank_max, 1,
 				 vblank);
 	__v4l2_ctrl_s_ctrl(sensor->vblank_ctrl, vblank);
-	__v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max, 1,
-				 VD56G3_EXPOSURE_DEFAULT);
+	__v4l2_ctrl_modify_range(sensor->expo_ctrl, VD56G3_EXPOSURE_MIN,
+				 expo_max, 1, VD56G3_EXPOSURE_DEFAULT);
 	__v4l2_ctrl_s_ctrl(sensor->expo_ctrl, VD56G3_EXPOSURE_DEFAULT);
 }
 
