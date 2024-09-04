@@ -59,6 +59,9 @@
 				reset-gpios = <&gpio 5 1>;
 				st,leds = <6>;
 
+				orientation = <2>;
+				rotation = <0>;
+
 				port {
 					fox_ep: endpoint {
 						clock-lanes = <0>;
