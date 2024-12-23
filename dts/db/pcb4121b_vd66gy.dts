@@ -2,30 +2,27 @@
 /plugin/;
 
 / {
-	compatible = "qcom,apq8016-sbc", "qcom,apq8016", "qcom,sbc";
 
-	fragment@1 {
+	fragment@0 {
 		target = <&blsp_i2c2>;
 		__overlay__ {
-			#address-cells = <1>;
-			#size-cells = <0>;
-			cam0: cam0@10 {
-				status = "ok";
-				compatible = "st,vd66gy";
-				reg = <0x10>;
-				clocks = <&camera_clk_12M>;
-				clock-names = "xclk";
-				vcore-supply = <&v1v2>;
-				vddio-supply = <&v1v8>;
-				vana-supply = <&v2v8>;
-				reset-gpios = <&msmgpio 35 1>;
-				port {
-					cam0_ep: endpoint {
-						clock-lanes = <0>;
-						data-lanes = <1 2>;
-						remote-endpoint = <&csiphy0_ep>;
-						link-frequencies =
-							/bits/ 64 <402000000>;
+			status = "okay";
+		};
+	};
+
+	fragment@1 {
+		target = <&camss>;
+		__overlay__ {
+			status = "okay";
+
+			ports {
+				/* The port index denotes CSI PHY -> here CSI0 */
+				port@0 {
+					reg = <0x0>;
+					csiphy0_ep: endpoint {
+						clock-lanes = <1>;
+						data-lanes = <0 2>;
+						remote-endpoint = <&vd56g3_ep>;
 					};
 				};
 			};
@@ -33,24 +30,8 @@
 	};
 
 	fragment@2 {
-		target = <&csiphy0_ep>;
-		__overlay__ {
-			status="ok";
-			remote-endpoint = <&cam0_ep>;
-			clock-lanes = <1>;
-			data-lanes = <0 2>;
-		};
-	};
-
-	fragment@100 {
 		target = <&soc>;
 		__overlay__ {
-			camera_clk_24M: camera_clk_24M {
-				#clock-cells = <0>;
-				compatible = "fixed-clock";
-				clock-frequency = <24000000>;
-			};
-
 			camera_clk_12M: camera_clk_12M {
 				#clock-cells = <0>;
 				compatible = "fixed-clock";
@@ -83,41 +64,35 @@
 				/* we connect spider 3v3 to 2v8 throught stmipi */
 				/*vin-supply = <&v2v8>;*/
 			};
+		};
+	};
 
-			camss@1b00000 {
-				status = "okay";
-				ports {
-					#address-cells = <1>;
-					#size-cells = <0>;
-					port@0 {
-						reg = <0>;
-						csiphy0_ep: endpoint {
-							status = "disabled";
-						};
-					};
-					port@1 {
-						reg = <1>;
-						csiphy1_ep: endpoint {
-							status = "disabled";
-						};
+	fragment@3 {
+		target = <&blsp_i2c2>;
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			cam0: cam0@10 {
+				status = "ok";
+				compatible = "st,vd66gy";
+				reg = <0x10>;
+				clocks = <&camera_clk_12M>;
+				clock-names = "xclk";
+				vcore-supply = <&v1v2>;
+				vddio-supply = <&v1v8>;
+				vana-supply = <&v2v8>;
+				reset-gpios = <&tlmm 35 1>;
+				port {
+					vd56g3_ep: endpoint {
+						clock-lanes = <0>;
+						data-lanes = <1 2>;
+						link-frequencies =
+							/bits/ 64 <402000000>;
+						remote-endpoint = <&csiphy0_ep>;
 					};
 				};
 			};
 		};
 	};
 
-	/* set all i2c to 400Khz */
-	fragment@101 {
-		target = <&blsp_i2c2>;
-		__overlay__ {
-			clock-frequency = <400000>;
-		};
-	};
-	fragment@102 {
-		target = <&blsp_i2c6>;
-		__overlay__ {
-			clock-frequency = <400000>;
-		};
-	};
 };
-
