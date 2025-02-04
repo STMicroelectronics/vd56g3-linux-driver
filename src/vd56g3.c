@@ -1655,9 +1655,6 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 	unsigned int binning;
 	int ret = 0;
 
-	if (sensor->streaming)
-		return -EBUSY;
-
 	mutex_lock(&sensor->lock);
 
 	/* Identify the mode that best suits the requested resolution */
