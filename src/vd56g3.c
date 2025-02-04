@@ -225,9 +225,11 @@ int pm_runtime_get_if_in_use(struct device *dev)
 #define VD56G3_LINE_LENGTH_MIN				1236
 #define VD56G3_VBLANK_MIN				110
 #define VD56G3_FRAME_LENGTH_DEF_60FPS			2168
+#define VD56G3_FRAME_LENGTH_MAX				0xffff
 
 /* Exposure settings */
 #define VD56G3_EXPOSURE_MARGIN				75
+#define VD56G3_EXPOSURE_MIN				21
 #define VD56G3_EXPOSURE_DEFAULT				1420
 
 /* Output Interface settings */
@@ -777,12 +779,12 @@ static int vd56g3_lock_exposure(struct vd56g3 *sensor, u32 lock_val)
 	bool ae_lock = lock_val & V4L2_LOCK_EXPOSURE;
 	enum vd56g3_expo_state expo_state = ae_lock ? VD56G3_EXP_MODE_FREEZE :
 						      VD56G3_EXP_MODE_AUTO;
-	int ret = 0;
 
 	if (sensor->ae_ctrl->val == V4L2_EXPOSURE_AUTO)
-		vd56g3_write(sensor, VD56G3_REG_EXP_MODE, expo_state, &ret);
+		return vd56g3_write(sensor, VD56G3_REG_EXP_MODE, expo_state,
+				    NULL);
 
-	return ret;
+	return 0;
 }
 
 static int vd56g3_write_gpiox(struct vd56g3 *sensor, unsigned long gpio_mask)
@@ -837,7 +839,11 @@ static int vd56g3_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 	}
 
 	pm_runtime_mark_last_busy(&client->dev);
+#if KERNEL_VERSION(6, 9, 0) > LINUX_VERSION_CODE
 	pm_runtime_put_autosuspend(&client->dev);
+#else
+	__pm_runtime_put_autosuspend(&client->dev);
+#endif
 
 	return ret;
 }
@@ -861,8 +867,8 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_VBLANK:
 		frame_length = sensor->active_crop.height + ctrl->val;
 		expo_max = frame_length - VD56G3_EXPOSURE_MARGIN;
-		__v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max, 1,
-					 VD56G3_EXPOSURE_DEFAULT);
+		__v4l2_ctrl_modify_range(sensor->expo_ctrl, VD56G3_EXPOSURE_MIN,
+					 expo_max, 1, VD56G3_EXPOSURE_DEFAULT);
 		break;
 	case V4L2_CID_EXPOSURE_AUTO:
 		is_auto = (ctrl->val == V4L2_EXPOSURE_AUTO);
@@ -946,7 +952,11 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 	}
 
 	pm_runtime_mark_last_busy(&client->dev);
+#if KERNEL_VERSION(6, 9, 0) > LINUX_VERSION_CODE
 	pm_runtime_put_autosuspend(&client->dev);
+#else
+	__pm_runtime_put_autosuspend(&client->dev);
+#endif
 
 	return ret;
 }
@@ -1143,7 +1153,8 @@ static void vd56g3_update_controls(struct vd56g3 *sensor)
 	unsigned int vblank_min = VD56G3_VBLANK_MIN;
 	unsigned int vblank =
 		VD56G3_FRAME_LENGTH_DEF_60FPS - sensor->active_crop.height;
-	unsigned int vblank_max = 0xffff - sensor->active_crop.height;
+	unsigned int vblank_max =
+		VD56G3_FRAME_LENGTH_MAX - sensor->active_crop.height;
 	unsigned int frame_length = sensor->active_crop.height + vblank;
 	unsigned int expo_max = frame_length - VD56G3_EXPOSURE_MARGIN;
 
@@ -1153,8 +1164,8 @@ static void vd56g3_update_controls(struct vd56g3 *sensor)
 	__v4l2_ctrl_modify_range(sensor->vblank_ctrl, vblank_min, vblank_max, 1,
 				 vblank);
 	__v4l2_ctrl_s_ctrl(sensor->vblank_ctrl, vblank);
-	__v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max, 1,
-				 VD56G3_EXPOSURE_DEFAULT);
+	__v4l2_ctrl_modify_range(sensor->expo_ctrl, VD56G3_EXPOSURE_MIN,
+				 expo_max, 1, VD56G3_EXPOSURE_DEFAULT);
 	__v4l2_ctrl_s_ctrl(sensor->expo_ctrl, VD56G3_EXPOSURE_DEFAULT);
 }
 
@@ -1162,6 +1173,10 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 {
 	const struct v4l2_ctrl_ops *ops = &vd56g3_ctrl_ops;
 	struct v4l2_ctrl_handler *hdl = &sensor->ctrl_handler;
+#if KERNEL_VERSION(5, 8, 0) > LINUX_VERSION_CODE
+#else
+	struct v4l2_fwnode_device_properties fwnode_props;
+#endif
 	struct v4l2_ctrl *ctrl;
 	int ret;
 
@@ -1281,6 +1296,18 @@ static int vd56g3_init_controls(struct vd56g3 *sensor)
 
 	v4l2_ctrl_cluster(2, &sensor->hflip_ctrl);
 	v4l2_ctrl_auto_cluster(4, &sensor->ae_ctrl, V4L2_EXPOSURE_MANUAL, true);
+
+#if KERNEL_VERSION(5, 8, 0) > LINUX_VERSION_CODE
+#else
+	/* Optional controls coming from fwnode (e.g. rotation, orientation). */
+	ret = v4l2_fwnode_device_parse(&sensor->i2c_client->dev, &fwnode_props);
+	if (ret)
+		goto free_ctrls;
+
+	ret = v4l2_ctrl_new_fwnode_properties(hdl, ops, &fwnode_props);
+	if (ret)
+		goto free_ctrls;
+#endif
 
 	sensor->sd.ctrl_handler = hdl;
 
@@ -1417,7 +1444,11 @@ static int vd56g3_s_stream(struct v4l2_subdev *sd, int enable)
 	} else {
 		vd56g3_stream_off(sensor);
 		pm_runtime_mark_last_busy(&client->dev);
+#if KERNEL_VERSION(6, 9, 0) > LINUX_VERSION_CODE
 		pm_runtime_put_autosuspend(&client->dev);
+#else
+		__pm_runtime_put_autosuspend(&client->dev);
+#endif
 	}
 
 #if KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE
@@ -1624,9 +1655,6 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 	unsigned int binning;
 	int ret = 0;
 
-	if (sensor->streaming)
-		return -EBUSY;
-
 	mutex_lock(&sensor->lock);
 
 	/* Identify the mode that best suits the requested resolution */
@@ -1735,6 +1763,7 @@ static int vd56g3_init_cfg(struct v4l2_subdev *sd,
 	/* Default resolution mode / raw8 */
 	vd56g3_update_img_pad_format(sensor, &vd56g3_supported_modes[def_mode],
 				     vd56g3_mbus_codes[0][0], img_pad_fmt);
+
 	return 0;
 }
 #endif
@@ -1935,6 +1964,7 @@ static int vd56g3_power_off(struct vd56g3 *sensor)
 	clk_disable_unprepare(sensor->xclk);
 	gpiod_set_value_cansleep(sensor->reset_gpio, 1);
 	regulator_bulk_disable(ARRAY_SIZE(sensor->supplies), sensor->supplies);
+
 	return 0;
 }
 
@@ -2005,7 +2035,8 @@ static int vd56g3_check_csi_conf(struct vd56g3 *sensor,
 		goto done;
 	}
 
-	/* Prepare Output Interface conf based on lane settings
+	/*
+	 * Prepare Output Interface conf based on lane settings
 	 * logical to physical lane conversion (+ pad remaining slots)
 	 */
 	for (l = 0; l < n_lanes; l++)
@@ -2246,7 +2277,7 @@ static int vd56g3_detect(struct vd56g3 *sensor)
 	model = (uintptr_t)device_get_match_data(dev);
 #endif
 
-	vd56g3_read(sensor, VD56G3_REG_MODEL_ID, &model_id, &ret);
+	ret = vd56g3_read(sensor, VD56G3_REG_MODEL_ID, &model_id, NULL);
 	if (ret)
 		return ret;
 
@@ -2255,7 +2286,7 @@ static int vd56g3_detect(struct vd56g3 *sensor)
 		return -ENODEV;
 	}
 
-	vd56g3_read(sensor, VD56G3_REG_REVISION, &device_revision, &ret);
+	ret = vd56g3_read(sensor, VD56G3_REG_REVISION, &device_revision, NULL);
 	if (ret)
 		return ret;
 
@@ -2269,8 +2300,8 @@ static int vd56g3_detect(struct vd56g3 *sensor)
 		return -ENODEV;
 	}
 
-	vd56g3_read(sensor, VD56G3_REG_OPTICAL_REVISION, &optical_revision,
-		    &ret);
+	ret = vd56g3_read(sensor, VD56G3_REG_OPTICAL_REVISION,
+			  &optical_revision, NULL);
 	if (ret)
 		return ret;
 
@@ -2339,6 +2370,7 @@ static int vd56g3_subdev_init(struct vd56g3 *sensor)
 
 err_media:
 	media_entity_cleanup(&sensor->sd.entity);
+
 	return ret;
 }
 
@@ -2442,7 +2474,11 @@ static int vd56g3_probe(struct i2c_client *client)
 	if (sensor->is_fastboot)
 		pm_runtime_set_autosuspend_delay(dev, 1000);
 	pm_runtime_mark_last_busy(dev);
+#if KERNEL_VERSION(6, 9, 0) > LINUX_VERSION_CODE
 	pm_runtime_put_autosuspend(dev);
+#else
+	__pm_runtime_put_autosuspend(dev);
+#endif
 
 	dev_info(&client->dev, "Successfully probe %s sensor",
 		 (sensor->is_mono) ? "vd56g3" : "vd66gy");
@@ -2455,6 +2491,7 @@ err_power_off:
 	pm_runtime_disable(dev);
 	pm_runtime_put_noidle(dev);
 	vd56g3_power_off(sensor);
+
 	return ret;
 }
 
@@ -2474,6 +2511,7 @@ static void vd56g3_remove(struct i2c_client *client)
 		vd56g3_power_off(sensor);
 	pm_runtime_set_suspended(&client->dev);
 #if KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE
+
 	return 0;
 #endif
 }
