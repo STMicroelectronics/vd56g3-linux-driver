@@ -1,3 +1,9 @@
+vd56g3-dkms (1.0.3-2) unstable; urgency=medium
+
+  * Add dts folder to package
+
+ -- Benjamin Mugnier <benjamin.mugnier@st.com>  Tue, 11 Mar 2025 15:45:36 +0100
+
 vd56g3-dkms (1.0.3-1) unstable; urgency=medium
 
   * New upstream release
