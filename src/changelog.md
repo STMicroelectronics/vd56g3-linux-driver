@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.0.4] - 2025-03-26
+- Add support to .init_state() API for kernels > k6.8
+- Apply format unconditionnally
+- Use subdev active state for kernels > k5.19
+- __v4l2_ctrl_modify_range() and __v4l2_ctrl_s_ctrl() may fail
+
+## [1.0.3] - 2025-02-04
+- Fix subdevice not being accessible while streaming
+- dt-bindings: Improve bindings (our sensor is a video-interface-device)
+- Add v4l2_fwnode ctrls parse and addition
+- Exposure is bounded by a minimum number of lines
+- Move to __pm_runtime_put_autosuspend() on latest kernels
+
 ## [1.0.2] - 2024-06-05
 - Follow rules and convention for driver/bindinfs naming
 
