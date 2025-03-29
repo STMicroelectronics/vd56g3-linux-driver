@@ -352,12 +352,6 @@ static const struct regmap_config vd56g3_regmap_config = {
 };
 #endif
 
-enum vd56g3_expo_state {
-	VD56G3_EXPO_AUTO,
-	VD56G3_EXPO_AUTO_FREEZE,
-	VD56G3_EXPO_MANUAL
-};
-
 struct vd56g3 {
 	struct i2c_client *i2c_client;
 	struct v4l2_subdev sd;
@@ -717,8 +711,7 @@ static int vd56g3_update_patgen(struct vd56g3 *sensor, u32 patgen_index)
 
 static int vd56g3_update_expo_cluster(struct vd56g3 *sensor, bool is_auto)
 {
-	enum vd56g3_expo_state expo_state = is_auto ? VD56G3_EXP_MODE_AUTO :
-						      VD56G3_EXP_MODE_MANUAL;
+	u8 expo_state = is_auto ? VD56G3_EXP_MODE_AUTO : VD56G3_EXP_MODE_MANUAL;
 	int ret = 0;
 
 	if (sensor->ae_ctrl->is_new)
@@ -760,8 +753,7 @@ static int vd56g3_update_expo_cluster(struct vd56g3 *sensor, bool is_auto)
 static int vd56g3_lock_exposure(struct vd56g3 *sensor, u32 lock_val)
 {
 	bool ae_lock = lock_val & V4L2_LOCK_EXPOSURE;
-	enum vd56g3_expo_state expo_state = ae_lock ? VD56G3_EXP_MODE_FREEZE :
-						      VD56G3_EXP_MODE_AUTO;
+	u8 expo_state = ae_lock ? VD56G3_EXP_MODE_FREEZE : VD56G3_EXP_MODE_AUTO;
 
 	if (sensor->ae_ctrl->val == V4L2_EXPOSURE_AUTO)
 		return vd56g3_write(sensor, VD56G3_REG_EXP_MODE, expo_state,
