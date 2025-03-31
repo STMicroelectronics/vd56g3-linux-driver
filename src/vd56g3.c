@@ -1755,11 +1755,9 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 		 * This nested 'if' only avoid to reset ctrls while format
 		 * hasn't changed (userspace pb, we shouldn't interfere ?)
 		 */
+		sensor->active_fmt = sd_fmt->format;
+		sensor->active_crop = pad_crop;
 		ret = vd56g3_update_controls(sensor);
-		if (!ret) {
-			sensor->active_fmt = sd_fmt->format;
-			sensor->active_crop = pad_crop;
-		}
 	}
 #else
 #if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
@@ -1767,19 +1765,16 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 #else
 	pad_fmt = v4l2_subdev_state_get_format(sd_state, sd_fmt->pad);
 #endif
+	*pad_fmt = sd_fmt->format;
 
-	/* Update active state's format and crop */
+#if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
+	*v4l2_subdev_get_pad_crop(sd, sd_state, sd_fmt->pad) = pad_crop;
+#else
+	*v4l2_subdev_state_get_crop(sd_state, sd_fmt->pad) = pad_crop;
+#endif
+
 	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE)
 		ret = vd56g3_update_controls(sensor);
-
-	if (!ret) {
-		*pad_fmt = sd_fmt->format;
-#if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
-		*v4l2_subdev_get_pad_crop(sd, sd_state, sd_fmt->pad) = pad_crop;
-#else
-		*v4l2_subdev_state_get_crop(sd_state, sd_fmt->pad) = pad_crop;
-#endif
-	}
 #endif
 
 #if KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE
