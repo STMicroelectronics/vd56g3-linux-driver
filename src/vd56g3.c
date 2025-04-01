@@ -56,27 +56,6 @@
 #include <linux/units.h>
 #endif
 
-#if KERNEL_VERSION(5, 9, 0) > LINUX_VERSION_CODE
-int dev_err_probe(const struct device *dev, int err, const char *fmt, ...)
-{
-	struct va_format vaf;
-	va_list args;
-
-	va_start(args, fmt);
-	vaf.fmt = fmt;
-	vaf.va = &args;
-
-	if (err != -EPROBE_DEFER)
-		dev_err(dev, "error %d: %pV", err, &vaf);
-	else
-		dev_dbg(dev, "error %d: %pV", err, &vaf);
-
-	va_end(args);
-
-	return err;
-}
-#endif
-
 #if KERNEL_VERSION(4, 16, 0) > LINUX_VERSION_CODE
 #include <linux/of_device.h>
 #endif
@@ -372,12 +351,6 @@ static const struct regmap_config vd56g3_regmap_config = {
 	.reg_format_endian = REGMAP_ENDIAN_BIG,
 };
 #endif
-
-enum vd56g3_expo_state {
-	VD56G3_EXPO_AUTO,
-	VD56G3_EXPO_AUTO_FREEZE,
-	VD56G3_EXPO_MANUAL
-};
 
 struct vd56g3 {
 	struct i2c_client *i2c_client;
@@ -738,8 +711,7 @@ static int vd56g3_update_patgen(struct vd56g3 *sensor, u32 patgen_index)
 
 static int vd56g3_update_expo_cluster(struct vd56g3 *sensor, bool is_auto)
 {
-	enum vd56g3_expo_state expo_state = is_auto ? VD56G3_EXP_MODE_AUTO :
-						      VD56G3_EXP_MODE_MANUAL;
+	u8 expo_state = is_auto ? VD56G3_EXP_MODE_AUTO : VD56G3_EXP_MODE_MANUAL;
 	int ret = 0;
 
 	if (sensor->ae_ctrl->is_new)
@@ -781,8 +753,7 @@ static int vd56g3_update_expo_cluster(struct vd56g3 *sensor, bool is_auto)
 static int vd56g3_lock_exposure(struct vd56g3 *sensor, u32 lock_val)
 {
 	bool ae_lock = lock_val & V4L2_LOCK_EXPOSURE;
-	enum vd56g3_expo_state expo_state = ae_lock ? VD56G3_EXP_MODE_FREEZE :
-						      VD56G3_EXP_MODE_AUTO;
+	u8 expo_state = ae_lock ? VD56G3_EXP_MODE_FREEZE : VD56G3_EXP_MODE_AUTO;
 
 	if (sensor->ae_ctrl->val == V4L2_EXPOSURE_AUTO)
 		return vd56g3_write(sensor, VD56G3_REG_EXP_MODE, expo_state,
@@ -1784,11 +1755,9 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 		 * This nested 'if' only avoid to reset ctrls while format
 		 * hasn't changed (userspace pb, we shouldn't interfere ?)
 		 */
+		sensor->active_fmt = sd_fmt->format;
+		sensor->active_crop = pad_crop;
 		ret = vd56g3_update_controls(sensor);
-		if (!ret) {
-			sensor->active_fmt = sd_fmt->format;
-			sensor->active_crop = pad_crop;
-		}
 	}
 #else
 #if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
@@ -1796,19 +1765,16 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 #else
 	pad_fmt = v4l2_subdev_state_get_format(sd_state, sd_fmt->pad);
 #endif
+	*pad_fmt = sd_fmt->format;
 
-	/* Update active state's format and crop */
+#if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
+	*v4l2_subdev_get_pad_crop(sd, sd_state, sd_fmt->pad) = pad_crop;
+#else
+	*v4l2_subdev_state_get_crop(sd_state, sd_fmt->pad) = pad_crop;
+#endif
+
 	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE)
 		ret = vd56g3_update_controls(sensor);
-
-	if (!ret) {
-		*pad_fmt = sd_fmt->format;
-#if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
-		*v4l2_subdev_get_pad_crop(sd, sd_state, sd_fmt->pad) = pad_crop;
-#else
-		*v4l2_subdev_state_get_crop(sd_state, sd_fmt->pad) = pad_crop;
-#endif
-	}
 #endif
 
 #if KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE
@@ -2552,6 +2518,16 @@ static void vd56g3_subdev_cleanup(struct vd56g3 *sensor)
 	v4l2_ctrl_handler_free(sensor->sd.ctrl_handler);
 }
 
+static int vd56g3_err_probe(struct device *dev, int ret, char *msg)
+{
+#if KERNEL_VERSION(5, 9, 0) > LINUX_VERSION_CODE
+	dev_err(dev, "%s", msg);
+	return ret;
+#else
+	return dev_err_probe(dev, ret, msg);
+#endif
+}
+
 #if KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE
 static int vd56g3_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
@@ -2571,17 +2547,18 @@ static int vd56g3_probe(struct i2c_client *client)
 
 	ret = vd56g3_parse_dt(sensor);
 	if (ret)
-		return dev_err_probe(dev, ret, "Failed to parse Device Tree.");
+		return vd56g3_err_probe(dev, ret,
+					"Failed to parse Device Tree.");
 
 	/* Get (and check) resources : power regs, ext clock, reset gpio */
 	ret = vd56g3_get_regulators(sensor);
 	if (ret)
-		return dev_err_probe(dev, ret, "Failed to get regulators.");
+		return vd56g3_err_probe(dev, ret, "Failed to get regulators.");
 
 	sensor->xclk = devm_clk_get(dev, NULL);
 	if (IS_ERR(sensor->xclk))
-		return dev_err_probe(dev, PTR_ERR(sensor->xclk),
-				     "Failed to get xclk.");
+		return vd56g3_err_probe(dev, PTR_ERR(sensor->xclk),
+					"Failed to get xclk.");
 	sensor->xclk_freq = clk_get_rate(sensor->xclk);
 	ret = vd56g3_prepare_clock_tree(sensor);
 	if (ret)
@@ -2590,8 +2567,8 @@ static int vd56g3_probe(struct i2c_client *client)
 	sensor->reset_gpio =
 		devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
 	if (IS_ERR(sensor->reset_gpio))
-		return dev_err_probe(dev, PTR_ERR(sensor->reset_gpio),
-				     "Failed to get reset gpio.");
+		return vd56g3_err_probe(dev, PTR_ERR(sensor->reset_gpio),
+					"Failed to get reset gpio.");
 
 #if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
 	sensor->regmap = devm_regmap_init_i2c(client, &vd56g3_regmap_config);
@@ -2599,13 +2576,13 @@ static int vd56g3_probe(struct i2c_client *client)
 	sensor->regmap = devm_cci_regmap_init_i2c(client, 16);
 #endif
 	if (IS_ERR(sensor->regmap))
-		return dev_err_probe(dev, PTR_ERR(sensor->regmap),
-				     "Failed to init regmap.");
+		return vd56g3_err_probe(dev, PTR_ERR(sensor->regmap),
+					"Failed to init regmap.");
 
 	/* Power ON */
 	ret = vd56g3_power_on(sensor);
 	if (ret)
-		return dev_err_probe(dev, ret, "Sensor power on failed.");
+		return vd56g3_err_probe(dev, ret, "Sensor power on failed.");
 
 	/* Enable PM runtime with autosuspend (sensor being ON, set active) */
 	pm_runtime_set_active(dev);
