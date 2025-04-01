@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.5] - 2025-04-01
+- Fix regression on H/V blankings
+- Drop enum vd56g3_expo_state definition
+- Prevent dev_err_probe() multiple declarations
+
 ## [1.0.4] - 2025-03-26
 - Add support to .init_state() API for kernels > k6.8
 - Apply format unconditionnally
