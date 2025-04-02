@@ -14,8 +14,6 @@
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 
-#include <asm/unaligned.h>
-
 #include <media/v4l2-async.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
@@ -25,6 +23,12 @@
 
 /* Backward compatibility */
 #include <linux/version.h>
+
+#if KERNEL_VERSION(6, 12, 0) > LINUX_VERSION_CODE
+#include <asm/unaligned.h>
+#else
+#include <linux/unaligned.h>
+#endif
 
 #if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
 /*
