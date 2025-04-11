@@ -14,8 +14,6 @@
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 
-#include <asm/unaligned.h>
-
 #include <media/v4l2-async.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
@@ -25,6 +23,12 @@
 
 /* Backward compatibility */
 #include <linux/version.h>
+
+#if KERNEL_VERSION(6, 12, 0) > LINUX_VERSION_CODE
+#include <asm/unaligned.h>
+#else
+#include <linux/unaligned.h>
+#endif
 
 #if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
 /*
@@ -814,11 +818,7 @@ static int vd56g3_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 	}
 
 	pm_runtime_mark_last_busy(&client->dev);
-#if KERNEL_VERSION(6, 9, 0) > LINUX_VERSION_CODE
 	pm_runtime_put_autosuspend(&client->dev);
-#else
-	__pm_runtime_put_autosuspend(&client->dev);
-#endif
 
 	return ret;
 }
@@ -947,11 +947,7 @@ static int vd56g3_s_ctrl(struct v4l2_ctrl *ctrl)
 	}
 
 	pm_runtime_mark_last_busy(&client->dev);
-#if KERNEL_VERSION(6, 9, 0) > LINUX_VERSION_CODE
 	pm_runtime_put_autosuspend(&client->dev);
-#else
-	__pm_runtime_put_autosuspend(&client->dev);
-#endif
 
 	return ret;
 }
@@ -1500,11 +1496,7 @@ static int vd56g3_s_stream(struct v4l2_subdev *sd, int enable)
 	} else {
 		vd56g3_stream_off(sensor);
 		pm_runtime_mark_last_busy(&client->dev);
-#if KERNEL_VERSION(6, 9, 0) > LINUX_VERSION_CODE
 		pm_runtime_put_autosuspend(&client->dev);
-#else
-		__pm_runtime_put_autosuspend(&client->dev);
-#endif
 	}
 
 #if KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE
@@ -2621,11 +2613,7 @@ static int vd56g3_probe(struct i2c_client *client)
 	if (sensor->is_fastboot)
 		pm_runtime_set_autosuspend_delay(dev, 1000);
 	pm_runtime_mark_last_busy(dev);
-#if KERNEL_VERSION(6, 9, 0) > LINUX_VERSION_CODE
 	pm_runtime_put_autosuspend(dev);
-#else
-	__pm_runtime_put_autosuspend(dev);
-#endif
 
 	dev_info(&client->dev, "Successfully probe %s sensor",
 		 (sensor->is_mono) ? "vd56g3" : "vd66gy");

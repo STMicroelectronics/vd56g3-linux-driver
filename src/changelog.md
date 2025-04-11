@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.0.6] - 2025-04-11
+- Revert "Move to __pm_runtime_put_autosuspend() on latest kernels"
+- Add compatibility with kernel 6.12
+
 ## [1.0.5] - 2025-04-01
 - Fix regression on H/V blankings
 - Drop enum vd56g3_expo_state definition
