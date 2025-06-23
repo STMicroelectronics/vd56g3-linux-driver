@@ -1704,9 +1704,9 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 	struct v4l2_mbus_framefmt *pad_fmt;
 	struct v4l2_rect pad_crop;
 	unsigned int binning;
+#if KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE
 	int ret = 0;
 
-#if KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE
 	mutex_lock(&sensor->lock);
 #endif
 
@@ -1723,7 +1723,7 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 	vd56g3_update_img_pad_format(sensor, new_mode, sd_fmt->format.code,
 				     &sd_fmt->format);
 
-	/* Compute crop rectangle (maximized via binning) */
+	/* Compute and update crop rectangle (maximized via binning) */
 	binning = min(VD56G3_NATIVE_WIDTH / sd_fmt->format.width,
 		      VD56G3_NATIVE_HEIGHT / sd_fmt->format.height);
 	binning = min(binning, 2U);
@@ -1740,17 +1740,15 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 		pad_fmt = v4l2_subdev_get_try_format(sd, sd_state, sd_fmt->pad);
 #endif
 		*pad_fmt = sd_fmt->format;
-	} else if (sd_fmt->format.width != sensor->active_fmt.width ||
-		   sd_fmt->format.height != sensor->active_fmt.height ||
-		   sd_fmt->format.code != sensor->active_fmt.code) {
-		/*
-		 * This nested 'if' only avoid to reset ctrls while format
-		 * hasn't changed (userspace pb, we shouldn't interfere ?)
-		 */
+	} else {
 		sensor->active_fmt = sd_fmt->format;
 		sensor->active_crop = pad_crop;
 		ret = vd56g3_update_controls(sensor);
 	}
+
+	mutex_unlock(&sensor->lock);
+
+	return ret;
 #else
 #if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
 	pad_fmt = v4l2_subdev_get_pad_format(sd, sd_state, sd_fmt->pad);
@@ -1765,15 +1763,12 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 	*v4l2_subdev_state_get_crop(sd_state, sd_fmt->pad) = pad_crop;
 #endif
 
+	/* Update controls in case of active state */
 	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE)
-		ret = vd56g3_update_controls(sensor);
-#endif
+		return vd56g3_update_controls(sensor);
 
-#if KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE
-	mutex_unlock(&sensor->lock);
+	return 0;
 #endif
-
-	return ret;
 }
 
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
