@@ -28,9 +28,10 @@ properties:
     enum:
       - st,vd56g3
       - st,vd66gy
+      - st,vd16gz
     description:
-      Two variants are availables; VD56G3 is a monochrome sensor while VD66GY
-      is a colour variant.
+      Three variants are availables; VD56G3 is a monochrome sensor, VD66GY is a
+      colour variant, while VD16GZ is a RGB NIR variant.
 
   reg:
     maxItems: 1
