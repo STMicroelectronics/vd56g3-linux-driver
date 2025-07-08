@@ -1,3 +1,9 @@
+vd56g3-dkms (1.2.0-1) unstable; urgency=medium
+
+  * New upstream release
+
+ -- Sylvain Petinot <sylvain.petinot@st.com>  Tue, 08 Jul 2025 15:37:11 +0200
+
 vd56g3-dkms (1.0.6-1) unstable; urgency=medium
 
   * New upstream release
