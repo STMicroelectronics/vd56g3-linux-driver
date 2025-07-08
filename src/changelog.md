@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.2.0] - 2025-07-08
+- Add minimal support for VD16GZ
+- Rework vd56g3_set_pad_fmt() function
+
 ## [1.0.6] - 2025-04-11
 - Revert "Move to __pm_runtime_put_autosuspend() on latest kernels"
 - Add compatibility with kernel 6.12
