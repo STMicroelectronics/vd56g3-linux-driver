@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * A V4L2 driver for ST VD56G3 (Mono) and VD66GY (RGB) global shutter cameras.
+ * A V4L2 driver for ST VD56G3 (Mono), VD66GY (RGB) and VD16GZ (RGBNIr) global
+ * shutter cameras.
  * Copyright (C) 2019, STMicroelectronics SA
  */
 
@@ -88,6 +89,7 @@ int pm_runtime_get_if_in_use(struct device *dev)
 #define VD56G3_REG_OPTICAL_REVISION			CCI_REG8(0x001a)
 #define VD56G3_OPTICAL_REVISION_MONO			0
 #define VD56G3_OPTICAL_REVISION_BAYER			1
+#define VD56G3_OPTICAL_REVISION_RGBNIR			2
 #define VD56G3_REG_FWPATCH_REVISION			CCI_REG16_LE(0x001e)
 #define VD56G3_REG_VTPATCH_ID				CCI_REG8(0x0020)
 #define VD56G3_REG_SYSTEM_FSM				CCI_REG8(0x0028)
@@ -246,12 +248,32 @@ static const char *const vd56g3_supply_names[] = {
 };
 
 /* -----------------------------------------------------------------------------
- * Models (VD56G3: Mono, VD66GY: Bayer RGB), Modes and formats
+ * Models, modes and formats.
+ * - VD56G3: Monochrome sensor (Y8 & Y10 media bus codes)
+ * - VD66GY: Bayer RGB (GRBG8 & GRBG10 media bus codes)
+ * - VD16GZ: RGBNIR pattern
+ */
+
+/*
+ * DISCLAIMER:
+ * For the time being, when using the VD16GZ (RGBNIR) sensor, this driver
+ * advertises Y8 or Y10 media bus codes.
+ *
+ * Currently, there is no RGBNIR media bus code defined in the Linux kernel. As
+ * a temporary workaround, the driver publishes Y8/Y10 bus codes to userspace to
+ * allow basic functionality.
+ *
+ * Users should be aware that this does not accurately represent the sensor's
+ * actual pixel and may affect image processing or color interpretation.
+ *
+ * Proper support for RGBNIR patterns will require defining a new media bus code
+ * in the kernel and updating this driver accordingly.
  */
 
 enum vd56g3_models {
 	VD56G3_MODEL_VD56G3,
 	VD56G3_MODEL_VD66GY,
+	VD56G3_MODEL_VD16GZ,
 };
 
 struct vd56g3_mode {
@@ -373,7 +395,7 @@ struct vd56g3 {
 	u32 gpios[VD56G3_NB_GPIOS];
 	bool ext_vt_sync;
 	unsigned long ext_leds_mask;
-	bool is_mono;
+	enum vd56g3_models model;
 	bool is_fastboot;
 #if KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE
 	/* lock to protect all members below */
@@ -1566,7 +1588,8 @@ endloops:
 	if (i_bpp >= ARRAY_SIZE(vd56g3_mbus_codes))
 		i_bpp = 0;
 
-	if (sensor->is_mono)
+	if (sensor->model == VD56G3_MODEL_VD56G3 ||
+	    sensor->model == VD56G3_MODEL_VD16GZ)
 		j = 0;
 	else
 		j = 1 + (sensor->hflip_ctrl->val ? 1 : 0) +
@@ -1704,9 +1727,9 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 	struct v4l2_mbus_framefmt *pad_fmt;
 	struct v4l2_rect pad_crop;
 	unsigned int binning;
+#if KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE
 	int ret = 0;
 
-#if KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE
 	mutex_lock(&sensor->lock);
 #endif
 
@@ -1723,7 +1746,7 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 	vd56g3_update_img_pad_format(sensor, new_mode, sd_fmt->format.code,
 				     &sd_fmt->format);
 
-	/* Compute crop rectangle (maximized via binning) */
+	/* Compute and update crop rectangle (maximized via binning) */
 	binning = min(VD56G3_NATIVE_WIDTH / sd_fmt->format.width,
 		      VD56G3_NATIVE_HEIGHT / sd_fmt->format.height);
 	binning = min(binning, 2U);
@@ -1740,17 +1763,15 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 		pad_fmt = v4l2_subdev_get_try_format(sd, sd_state, sd_fmt->pad);
 #endif
 		*pad_fmt = sd_fmt->format;
-	} else if (sd_fmt->format.width != sensor->active_fmt.width ||
-		   sd_fmt->format.height != sensor->active_fmt.height ||
-		   sd_fmt->format.code != sensor->active_fmt.code) {
-		/*
-		 * This nested 'if' only avoid to reset ctrls while format
-		 * hasn't changed (userspace pb, we shouldn't interfere ?)
-		 */
+	} else {
 		sensor->active_fmt = sd_fmt->format;
 		sensor->active_crop = pad_crop;
 		ret = vd56g3_update_controls(sensor);
 	}
+
+	mutex_unlock(&sensor->lock);
+
+	return ret;
 #else
 #if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
 	pad_fmt = v4l2_subdev_get_pad_format(sd, sd_state, sd_fmt->pad);
@@ -1765,15 +1786,12 @@ static int vd56g3_set_pad_fmt(struct v4l2_subdev *sd,
 	*v4l2_subdev_state_get_crop(sd_state, sd_fmt->pad) = pad_crop;
 #endif
 
+	/* Update controls in case of active state */
 	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE)
-		ret = vd56g3_update_controls(sensor);
-#endif
+		return vd56g3_update_controls(sensor);
 
-#if KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE
-	mutex_unlock(&sensor->lock);
+	return 0;
 #endif
-
-	return ret;
 }
 
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
@@ -2356,6 +2374,7 @@ static int vd56g3_prepare_clock_tree(struct vd56g3 *sensor)
 static const struct of_device_id vd56g3_dt_ids[] = {
 	{ .compatible = "st,vd56g3", .data = (void *)VD56G3_MODEL_VD56G3 },
 	{ .compatible = "st,vd66gy", .data = (void *)VD56G3_MODEL_VD66GY },
+	{ .compatible = "st,vd16gz", .data = (void *)VD56G3_MODEL_VD16GZ },
 	{ /* sentinel */ }
 };
 #endif
@@ -2408,16 +2427,26 @@ static int vd56g3_detect(struct vd56g3 *sensor)
 	if (ret)
 		return ret;
 
-	sensor->is_mono =
-		((optical_revision & 1) == VD56G3_OPTICAL_REVISION_MONO);
-	if ((sensor->is_mono && model == VD56G3_MODEL_VD66GY) ||
-	    (!sensor->is_mono && model == VD56G3_MODEL_VD56G3)) {
+	if ((model == VD56G3_MODEL_VD56G3 &&
+	     optical_revision != VD56G3_OPTICAL_REVISION_MONO) ||
+	    (model == VD56G3_MODEL_VD66GY &&
+	     optical_revision != VD56G3_OPTICAL_REVISION_BAYER) ||
+	    (model == VD56G3_MODEL_VD16GZ &&
+	     optical_revision != VD56G3_OPTICAL_REVISION_RGBNIR)) {
 		dev_err(&client->dev,
 			"Found %s sensor, while %s model is defined in DT",
-			(sensor->is_mono) ? "Mono" : "Bayer",
-			(model == VD56G3_MODEL_VD56G3) ? "vd56g3" : "vd66gy");
+			(optical_revision == VD56G3_OPTICAL_REVISION_MONO) ?
+				"Mono" :
+			(optical_revision == VD56G3_OPTICAL_REVISION_BAYER) ?
+				"Bayer" :
+				"RGBNIR",
+			(model == VD56G3_MODEL_VD56G3) ? "vd56g3" :
+			(model == VD56G3_MODEL_VD66GY) ? "vd66gy" :
+							 "vd16gz");
 		return -ENODEV;
 	}
+
+	sensor->model = model;
 
 	return 0;
 }
@@ -2616,7 +2645,9 @@ static int vd56g3_probe(struct i2c_client *client)
 	pm_runtime_put_autosuspend(dev);
 
 	dev_info(&client->dev, "Successfully probe %s sensor",
-		 (sensor->is_mono) ? "vd56g3" : "vd66gy");
+		 (sensor->model == VD56G3_MODEL_VD56G3) ? "vd56g3" :
+		 (sensor->model == VD56G3_MODEL_VD66GY) ? "vd66gy" :
+							  "vd16gz");
 
 	return 0;
 
@@ -2655,6 +2686,7 @@ static void vd56g3_remove(struct i2c_client *client)
 static const struct of_device_id vd56g3_dt_ids[] = {
 	{ .compatible = "st,vd56g3", .data = (void *)VD56G3_MODEL_VD56G3 },
 	{ .compatible = "st,vd66gy", .data = (void *)VD56G3_MODEL_VD66GY },
+	{ .compatible = "st,vd16gz", .data = (void *)VD56G3_MODEL_VD16GZ },
 	{ /* sentinel */ }
 };
 #endif
