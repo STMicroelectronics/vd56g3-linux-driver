@@ -5,7 +5,7 @@
 .gitignore export-ignore
 .gitattributes export-ignore
 .github export-ignore
-src/.clang-format export-ignore
+.clang-format export-ignore
 doc export-ignore
 release export-ignore
 Jenkinsfile export-ignore
