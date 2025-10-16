@@ -1,1 +1,1 @@
-obj-$(CONFIG_DRIVER_VD56G3)     += vd56g3.o
+obj-m += vd56g3.o
