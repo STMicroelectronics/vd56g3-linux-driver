@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.3.0] - 2025-12-05
+- dts: Add stm32mp2 device trees
+- Support yocto builds
+- Move src/ folder to /
+- Remove release script
+
 ## [1.2.0] - 2025-07-08
 - Add minimal support for VD16GZ
 - Rework vd56g3_set_pad_fmt() function
