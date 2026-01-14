@@ -32,6 +32,8 @@ modules.builtin
 *.lzo
 *.patch
 *.gcno
+*.dtb
+*.dtbo
 
 #
 # eclipse dot file files we want to keep
