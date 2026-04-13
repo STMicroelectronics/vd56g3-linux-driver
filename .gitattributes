@@ -8,7 +8,6 @@
 .clang-format export-ignore
 doc export-ignore
 release export-ignore
-Jenkinsfile export-ignore
 debian export-ignore
 CONTRIBUTING.md export-ignore
 dts/db  export-ignore
