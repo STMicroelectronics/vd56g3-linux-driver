@@ -1,12 +1,16 @@
 # ST VD56G3 Linux driver
 
+
+> [!TIP]
+> `vd56g3` has been **mainline** since **kernel v6.16**.
+> This repository adds extra features and support for older kernel versions.
+
+
 ## Supported Devices
 
-This driver support the following devices : 
-
-- VD56G3: Monochrome sensor
-- VD66GY: Color sensor
-- VD16GZ: RGB-NIR sensor
+- `vd56g3` : Monochrome sensor
+- `vd66gy` : Color sensor
+- `vd16gz` : RGB-NIR sensor
 
 ### Disclaimer
 
